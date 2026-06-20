@@ -1,0 +1,131 @@
+//! Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` via [`BethPlugin`]
+//! and print a summary of what was parsed.
+//!
+//! Run with the bundled master (default):
+//!
+//! ```text
+//! cargo run --example load_esm
+//! ```
+//!
+//! …or point it at another file:
+//!
+//! ```text
+//! cargo run --example load_esm -- path/to/Plugin.esp
+//! ```
+//!
+//! This is a headless example: it adds only `AssetPlugin` + `BethPlugin` and pumps the
+//! app manually until the asset finishes loading, so it needs none of Bevy's rendering
+//! or windowing features.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::time::Duration;
+
+use bevy::app::App;
+use bevy::asset::{AssetPlugin, AssetServer, Assets, Handle, LoadState};
+use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
+use clap::Parser;
+
+use bevy_beth::{BethPlugin, EsmAsset};
+
+/// Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` and print a summary.
+#[derive(Parser, Debug)]
+struct Args {
+    /// Path to the plugin file to load.
+    #[arg(default_value = "beth-rs/tests/Morrowind.esm")]
+    path: PathBuf,
+}
+
+fn main() -> ExitCode {
+    let args = Args::parse();
+    let path = &args.path;
+
+    // The AssetServer loads paths relative to an asset root, so split the argument into
+    // a root directory (the asset source) and the file name to load from it.
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        eprintln!("invalid path: {}", path.display());
+        return ExitCode::FAILURE;
+    };
+    let root = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_string_lossy().into_owned(),
+        _ => ".".to_string(),
+    };
+    if !path.exists() {
+        eprintln!("file not found: {}", path.display());
+        return ExitCode::FAILURE;
+    }
+
+    // DefaultPlugins would set these up; a headless app must initialize them itself.
+    IoTaskPool::get_or_init(Default::default);
+    AsyncComputeTaskPool::get_or_init(Default::default);
+    ComputeTaskPool::get_or_init(Default::default);
+
+    let mut app = App::new();
+    app.add_plugins((
+        AssetPlugin {
+            file_path: root,
+            ..Default::default()
+        },
+        BethPlugin,
+    ));
+
+    let handle: Handle<EsmAsset> = app
+        .world()
+        .resource::<AssetServer>()
+        .load(file_name.to_string());
+
+    // Pump the schedule until the background load completes (or we give up).
+    let mut state = LoadState::NotLoaded;
+    for _ in 0..2000 {
+        app.update();
+        state = app.world().resource::<AssetServer>().load_state(&handle);
+        if matches!(state, LoadState::Loaded | LoadState::Failed(_)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    if let LoadState::Failed(err) = &state {
+        eprintln!("failed to load {}: {err}", path.display());
+        return ExitCode::FAILURE;
+    }
+    if !matches!(state, LoadState::Loaded) {
+        eprintln!("timed out loading {} (last state: {state:?})", path.display());
+        return ExitCode::FAILURE;
+    }
+
+    let assets = app.world().resource::<Assets<EsmAsset>>();
+    let plugin = assets.get(&handle).expect("asset present once loaded");
+    print_summary(&path.display().to_string(), plugin);
+    ExitCode::SUCCESS
+}
+
+fn print_summary(path: &str, asset: &EsmAsset) {
+    let h = &asset.0.header;
+    println!("Loaded {path} via Bevy AssetServer");
+    println!("  version:          {}", h.version);
+    println!("  master flag:      {}", h.flags & 0x1 != 0);
+    println!("  company:          {}", h.company);
+    println!("  declared records: {}", h.num_records);
+    if !h.masters.is_empty() {
+        println!("  masters:");
+        for m in &h.masters {
+            println!("    - {} ({} bytes)", m.name, m.size);
+        }
+    }
+
+    println!("  parsed records:   {}", asset.0.records.len());
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for record in &asset.0.records {
+        *counts
+            .entry(String::from_utf8_lossy(&record.tag()).into_owned())
+            .or_default() += 1;
+    }
+    let mut by_count: Vec<_> = counts.iter().collect();
+    by_count.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    println!("  top record types:");
+    for (tag, count) in by_count.into_iter().take(10) {
+        println!("    {tag}  {count}");
+    }
+}
