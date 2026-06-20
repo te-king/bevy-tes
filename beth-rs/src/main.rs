@@ -24,10 +24,19 @@ enum Command {
         #[arg(default_value = "beth-rs/tests/Morrowind.esm")]
         path: PathBuf,
     },
-    /// List the contents of a BSA archive.
+    /// Inspect or extract from a BSA archive.
     Bsa {
+        #[command(subcommand)]
+        command: BsaCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum BsaCommand {
+    /// List the contents of a BSA archive.
+    List {
         /// Path to the .bsa archive.
-        path: PathBuf,
+        archive: PathBuf,
         /// Show at most this many entries.
         #[arg(long)]
         limit: Option<usize>,
@@ -42,13 +51,29 @@ enum Command {
         #[arg(short, long)]
         out: Option<PathBuf>,
     },
+    /// Extract all files from a BSA archive into a directory.
+    ExtractAll {
+        /// Path to the .bsa archive.
+        archive: PathBuf,
+        /// Output directory (created if missing). Defaults to the current directory.
+        #[arg(short, long, default_value = ".")]
+        out: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Esm { path } => run_esm(&path),
-        Command::Bsa { path, limit } => run_bsa(&path, limit),
-        Command::Extract { archive, name, out } => run_extract(&archive, &name, out.as_deref()),
+        Command::Bsa { command } => match command {
+            BsaCommand::List {
+                archive: path,
+                limit,
+            } => run_bsa(&path, limit),
+            BsaCommand::Extract { archive, name, out } => {
+                run_extract(&archive, &name, out.as_deref())
+            }
+            BsaCommand::ExtractAll { archive, out } => run_extract_all(&archive, &out),
+        },
     }
 }
 
@@ -116,7 +141,10 @@ fn run_bsa(path: &Path, limit: Option<usize>) -> ExitCode {
         println!("{:>10}  {}", f.data.len(), f.name);
     }
     if shown < bsa.files.len() {
-        println!("... {} more (use --limit to show more)", bsa.files.len() - shown);
+        println!(
+            "... {} more (use --limit to show more)",
+            bsa.files.len() - shown
+        );
     }
     ExitCode::SUCCESS
 }
@@ -148,6 +176,68 @@ fn run_extract(archive: &Path, name: &str, out: Option<&Path>) -> ExitCode {
         eprintln!("wrote {} bytes to {}", file.data.len(), path.display());
     }
     ExitCode::SUCCESS
+}
+
+fn run_extract_all(archive: &Path, out_dir: &Path) -> ExitCode {
+    let bytes = match std::fs::read(archive) {
+        Ok(b) => b,
+        Err(e) => return fail(archive, &e),
+    };
+    let bsa = match Bsa::parse(&bytes) {
+        Ok(b) => b,
+        Err(e) => return fail(archive, &e),
+    };
+
+    let mut files = 0u64;
+    let mut total = 0u64;
+    for f in &bsa.files {
+        let name = f.name.decode();
+        let Some(rel) = safe_relative_path(&name) else {
+            eprintln!("skipping unsafe entry name: {name}");
+            continue;
+        };
+        let dest = out_dir.join(rel);
+        if let Some(parent) = dest.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                return fail(parent, &e);
+            }
+        }
+        if let Err(e) = std::fs::write(&dest, f.data) {
+            return fail(&dest, &e);
+        }
+        files += 1;
+        total += f.data.len() as u64;
+    }
+
+    eprintln!(
+        "extracted {files} files ({total} bytes) to {}",
+        out_dir.display()
+    );
+    ExitCode::SUCCESS
+}
+
+/// Turn a BSA-internal name into a safe relative path under the output directory.
+///
+/// BSA names use Windows `\` separators. Returns `None` for anything that could
+/// escape the output directory (absolute paths, `..`, or empty after sanitizing).
+fn safe_relative_path(name: &str) -> Option<PathBuf> {
+    use std::path::Component;
+
+    let mut path = PathBuf::new();
+    for segment in name.replace('\\', "/").split('/') {
+        match Path::new(segment).components().next() {
+            // Drop empty segments (leading/trailing/double separators) and `.`.
+            None | Some(Component::CurDir) => {}
+            Some(Component::Normal(part)) => path.push(part),
+            // Anything else (`..`, root, prefix) could escape the target.
+            _ => return None,
+        }
+    }
+    if path.as_os_str().is_empty() {
+        None
+    } else {
+        Some(path)
+    }
 }
 
 fn fail(path: &Path, e: &dyn std::fmt::Display) -> ExitCode {
