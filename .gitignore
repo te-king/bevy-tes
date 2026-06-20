@@ -1,4 +1,5 @@
 /target
+.DS_Store
 
 # Bethesda game data — large, copyrighted, supplied locally (not redistributable).
 # Tests expect beth-rs/tests/Morrowind.esm to be present on the machine running them.

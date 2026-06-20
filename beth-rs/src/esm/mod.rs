@@ -25,8 +25,8 @@ use records::{
     clas::Clas, clot::Clot, cont::Cont, crea::Crea, dial::Dial, door::Door, ench::Ench, fact::Fact,
     glob::Glob, gmst::Gmst, info::Info, ingr::Ingr, land::Land, levc::Levc, levi::Levi, ligh::Ligh,
     lock::Lock, ltex::Ltex, mgef::Mgef, misc::Misc, npc::Npc, pgrd::Pgrd, prob::Prob, race::Race,
-    regn::Regn, repa::Repa, scpt::Scpt, skil::Skil, sndg::Sndg, soun::Soun, spel::Spel, stat::Stat,
-    weap::Weap,
+    regn::Regn, repa::Repa, scpt::Scpt, skil::Skil, sndg::Sndg, soun::Soun, spel::Spel, sscr::Sscr,
+    stat::Stat, weap::Weap,
 };
 
 /// A single parsed record. One variant per known TES3 record type, plus [`Record::Unknown`]
@@ -76,6 +76,7 @@ pub enum Record<'a> {
     Sndg(Sndg<'a>),
     Dial(Dial<'a>),
     Info(Info<'a>),
+    Sscr(Sscr<'a>),
     /// A record whose 4-byte tag is not recognized; its raw payload is preserved.
     Unknown {
         tag: Tag,
@@ -130,6 +131,7 @@ impl<'a> Record<'a> {
             Record::Sndg(_) => *b"SNDG",
             Record::Dial(_) => *b"DIAL",
             Record::Info(_) => *b"INFO",
+            Record::Sscr(_) => *b"SSCR",
             Record::Unknown { tag, .. } => *tag,
         }
     }
@@ -183,6 +185,7 @@ impl<'a> Record<'a> {
             b"SNDG" => Record::Sndg(Sndg::from_subrecords(subs)),
             b"DIAL" => Record::Dial(Dial::from_subrecords(subs)),
             b"INFO" => Record::Info(Info::from_subrecords(subs)),
+            b"SSCR" => Record::Sscr(Sscr::from_subrecords(subs)),
             _ => Record::Unknown { tag, flags, data },
         }
     }

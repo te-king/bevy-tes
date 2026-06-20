@@ -44,6 +44,7 @@ pub mod skil;
 pub mod sndg;
 pub mod soun;
 pub mod spel;
+pub mod sscr;
 pub mod stat;
 pub mod tes3;
 pub mod weap;
