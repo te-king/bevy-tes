@@ -3,8 +3,10 @@
 //! This crate currently focuses on the TES3 `.esm`/`.esp` plugin format, decoding it
 //! into typed Rust structures using [`nom`]. See [`esm`] for the public API.
 
+pub mod bsa;
 pub mod esm;
 pub mod types;
 
+pub use bsa::{Bsa, BsaError};
 pub use esm::{Plugin, Record, common::EsmError};
 pub use types::latin1::{L1Str, L1String};
