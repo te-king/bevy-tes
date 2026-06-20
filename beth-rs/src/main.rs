@@ -1,43 +1,69 @@
-//! Small CLI that loads a TES3 plugin and prints a summary.
+//! CLI for inspecting TES3 plugins and BSA archives.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use beth_rs::Plugin;
-use clap::Parser;
+use beth_rs::{Bsa, Plugin};
+use clap::{Parser, Subcommand};
 
-/// Parse a TES3 (Morrowind) `.esm`/`.esp` file and print a summary.
+/// Inspect Morrowind (TES3) data files.
 #[derive(Parser, Debug)]
-#[command(version, about)]
-struct Args {
-    /// Path to the plugin file to parse.
-    #[arg(default_value = "beth-rs/tests/Morrowind.esm")]
-    path: PathBuf,
+#[command(version, about, arg_required_else_help = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Parse a plugin (.esm/.esp) and print a summary.
+    Esm {
+        /// Path to the plugin file.
+        #[arg(default_value = "beth-rs/tests/Morrowind.esm")]
+        path: PathBuf,
+    },
+    /// List the contents of a BSA archive.
+    Bsa {
+        /// Path to the .bsa archive.
+        path: PathBuf,
+        /// Show at most this many entries.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Extract a single file from a BSA archive (to stdout, or to --out).
+    Extract {
+        /// Path to the .bsa archive.
+        archive: PathBuf,
+        /// File path inside the archive (case-insensitive, '/' or '\').
+        name: String,
+        /// Write to this file instead of stdout.
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
-    let args = Args::parse();
-    let path = args.path.display();
+    match Cli::parse().command {
+        Command::Esm { path } => run_esm(&path),
+        Command::Bsa { path, limit } => run_bsa(&path, limit),
+        Command::Extract { archive, name, out } => run_extract(&archive, &name, out.as_deref()),
+    }
+}
 
-    // Parsing is zero-copy, so the file bytes must outlive the parsed `Plugin`.
-    let bytes = match std::fs::read(&args.path) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("failed to read {path}: {e}");
-            return ExitCode::FAILURE;
-        }
+fn run_esm(path: &Path) -> ExitCode {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => return fail(path, &e),
     };
     let plugin = match Plugin::parse(&bytes) {
-        Ok(plugin) => plugin,
-        Err(e) => {
-            eprintln!("failed to parse {path}: {e}");
-            return ExitCode::FAILURE;
-        }
+        Ok(p) => p,
+        Err(e) => return fail(path, &e),
     };
 
     let h = &plugin.header;
-    println!("File:        {path}");
+    println!("File:        {}", path.display());
     println!("Version:     {}", h.version);
     println!("Master flag: {}", h.flags & 0x1 != 0);
     println!("Company:     {}", h.company);
@@ -51,19 +77,80 @@ fn main() -> ExitCode {
     }
 
     println!("\nParsed records: {}", plugin.records.len());
-
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
-        let tag = String::from_utf8_lossy(&record.tag()).into_owned();
-        *counts.entry(tag).or_default() += 1;
+        *counts
+            .entry(String::from_utf8_lossy(&record.tag()).into_owned())
+            .or_default() += 1;
     }
-
     println!("\nRecords by type:");
     let mut by_count: Vec<_> = counts.iter().collect();
     by_count.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
     for (tag, count) in by_count {
         println!("  {tag}  {count}");
     }
-
     ExitCode::SUCCESS
+}
+
+fn run_bsa(path: &Path, limit: Option<usize>) -> ExitCode {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => return fail(path, &e),
+    };
+    let bsa = match Bsa::parse(&bytes) {
+        Ok(b) => b,
+        Err(e) => return fail(path, &e),
+    };
+
+    let total: u64 = bsa.files.iter().map(|f| f.data.len() as u64).sum();
+    println!(
+        "Archive: {}  (version {:#x}, {} files, {} bytes of data)",
+        path.display(),
+        bsa.version,
+        bsa.files.len(),
+        total
+    );
+
+    let shown = limit.unwrap_or(bsa.files.len()).min(bsa.files.len());
+    for f in &bsa.files[..shown] {
+        println!("{:>10}  {}", f.data.len(), f.name);
+    }
+    if shown < bsa.files.len() {
+        println!("... {} more (use --limit to show more)", bsa.files.len() - shown);
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_extract(archive: &Path, name: &str, out: Option<&Path>) -> ExitCode {
+    let bytes = match std::fs::read(archive) {
+        Ok(b) => b,
+        Err(e) => return fail(archive, &e),
+    };
+    let bsa = match Bsa::parse(&bytes) {
+        Ok(b) => b,
+        Err(e) => return fail(archive, &e),
+    };
+
+    let Some(file) = bsa.get(name) else {
+        eprintln!("{}: no such file in archive: {name}", archive.display());
+        return ExitCode::FAILURE;
+    };
+
+    let result = match out {
+        Some(path) => std::fs::write(path, file.data),
+        None => std::io::stdout().write_all(file.data),
+    };
+    if let Err(e) = result {
+        eprintln!("failed to write output: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Some(path) = out {
+        eprintln!("wrote {} bytes to {}", file.data.len(), path.display());
+    }
+    ExitCode::SUCCESS
+}
+
+fn fail(path: &Path, e: &dyn std::fmt::Display) -> ExitCode {
+    eprintln!("{}: {e}", path.display());
+    ExitCode::FAILURE
 }
