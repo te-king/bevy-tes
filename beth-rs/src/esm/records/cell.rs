@@ -5,7 +5,7 @@
 //! by a variable set of fields describing that placement. Cells may also contain
 //! "moved references" (`MVRF`-led) recording objects relocated from another cell.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{
     Color, Subrecord, color, l1, finish, le_f32, le_i32, le_u32, parse_or_default,
 };
@@ -59,53 +59,53 @@ fn reference_transform(input: &[u8]) -> IResult<&[u8], ReferenceTransform> {
 
 /// A single object reference placed within a cell.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Reference<'a> {
+pub struct Reference {
     /// `FRMR` reference id.
     pub id: u32,
     /// `NAME` object id.
-    pub object: &'a L1Str,
+    pub object: L1String,
     pub blocked: Option<u8>,
     pub scale: Option<f32>,
-    pub owner_npc: Option<&'a L1Str>,
-    pub owner_global: Option<&'a L1Str>,
-    pub owner_faction: Option<&'a L1Str>,
+    pub owner_npc: Option<L1String>,
+    pub owner_global: Option<L1String>,
+    pub owner_faction: Option<L1String>,
     pub owner_faction_rank: Option<u32>,
-    pub soul: Option<&'a L1Str>,
+    pub soul: Option<L1String>,
     pub enchant_charge: Option<f32>,
     pub remaining_usage: Option<u32>,
     pub value: Option<u32>,
-    pub destinations: Vec<TravelDestination<'a>>,
+    pub destinations: Vec<TravelDestination>,
     pub lock_level: Option<u32>,
-    pub key: Option<&'a L1Str>,
-    pub trap: Option<&'a L1Str>,
+    pub key: Option<L1String>,
+    pub trap: Option<L1String>,
     pub disabled: Option<u8>,
     pub transform: Option<ReferenceTransform>,
 }
 
 /// A reference that was relocated from another cell.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct MovedReference<'a> {
+pub struct MovedReference {
     /// `MVRF` reference id (matches the moved reference's `FRMR`).
     pub reference_id: u32,
     /// Destination interior cell name (`CNAM`).
-    pub dest_cell: Option<&'a L1Str>,
+    pub dest_cell: Option<L1String>,
     /// Destination exterior grid (`CNDT`).
     pub dest_grid: Option<(i32, i32)>,
     /// The form reference that was moved.
-    pub reference: Reference<'a>,
+    pub reference: Reference,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Cell<'a> {
+pub struct Cell {
     /// Cell name (human-readable; may be empty for exterior cells).
-    pub name: &'a L1Str,
+    pub name: L1String,
     pub data: CellData,
-    pub region: Option<&'a L1Str>,
+    pub region: Option<L1String>,
     pub map_color: Option<Color>,
     pub water_height: Option<f32>,
     pub ambient: Option<AmbientLight>,
-    pub references: Vec<Reference<'a>>,
-    pub moved_references: Vec<MovedReference<'a>>,
+    pub references: Vec<Reference>,
+    pub moved_references: Vec<MovedReference>,
 }
 
 /// Tracks where in the CELL layout the sequential scan currently is.
@@ -116,10 +116,10 @@ enum Phase {
 }
 
 /// Flush the in-progress reference into either the plain or moved-reference list.
-fn flush<'a>(
-    out: &mut Cell<'a>,
-    current: &mut Option<Reference<'a>>,
-    pending_move: &mut Option<MovedReference<'a>>,
+fn flush(
+    out: &mut Cell,
+    current: &mut Option<Reference>,
+    pending_move: &mut Option<MovedReference>,
 ) {
     if let Some(reference) = current.take() {
         if let Some(mut moved) = pending_move.take() {
@@ -131,12 +131,12 @@ fn flush<'a>(
     }
 }
 
-impl<'a> Cell<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Cell<'a> {
+impl Cell {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Cell {
         let mut out = Cell::default();
         let mut phase = Phase::Header;
-        let mut current: Option<Reference<'a>> = None;
-        let mut pending_move: Option<MovedReference<'a>> = None;
+        let mut current: Option<Reference> = None;
+        let mut pending_move: Option<MovedReference> = None;
 
         for sub in subs {
             match &sub.tag {
@@ -168,7 +168,7 @@ impl<'a> Cell<'a> {
     }
 }
 
-fn header_field<'a>(out: &mut Cell<'a>, sub: &Subrecord<'a>) {
+fn header_field(out: &mut Cell, sub: &Subrecord<'_>) {
     match &sub.tag {
         b"NAME" => out.name = l1(sub.data),
         b"DATA" => out.data = parse_or_default(cell_data, sub.data),
@@ -180,7 +180,7 @@ fn header_field<'a>(out: &mut Cell<'a>, sub: &Subrecord<'a>) {
     }
 }
 
-fn moved_header_field<'a>(moved: Option<&mut MovedReference<'a>>, sub: &Subrecord<'a>) {
+fn moved_header_field(moved: Option<&mut MovedReference>, sub: &Subrecord<'_>) {
     let Some(moved) = moved else { return };
     match &sub.tag {
         b"CNAM" => moved.dest_cell = Some(l1(sub.data)),
@@ -199,7 +199,7 @@ fn grid(input: &[u8]) -> IResult<&[u8], (i32, i32)> {
     Ok((input, (x, y)))
 }
 
-fn reference_field<'a>(reference: Option<&mut Reference<'a>>, sub: &Subrecord<'a>) {
+fn reference_field(reference: Option<&mut Reference>, sub: &Subrecord<'_>) {
     let Some(r) = reference else { return };
     match &sub.tag {
         b"NAME" => r.object = l1(sub.data),

@@ -1,6 +1,6 @@
 //! `PGRD` — a cell path grid.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{
     Subrecord, l1, finish, le_i32, le_u16, le_u32, le_u8, parse_or_default,
 };
@@ -64,17 +64,17 @@ fn path_point(input: &[u8]) -> IResult<&[u8], PathPoint> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Pgrd<'a> {
+pub struct Pgrd {
     pub data: PathGridData,
     /// Cell name the path grid belongs to.
-    pub cell: &'a L1Str,
+    pub cell: L1String,
     pub points: Vec<PathPoint>,
     /// Flattened edge list; index into `points`, grouped per point by connection count.
     pub connections: Vec<u32>,
 }
 
-impl<'a> Pgrd<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Pgrd<'a> {
+impl Pgrd {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Pgrd {
         let mut out = Pgrd::default();
         for sub in subs {
             match &sub.tag {

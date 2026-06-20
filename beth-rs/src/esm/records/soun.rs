@@ -1,6 +1,6 @@
 //! `SOUN` — a sound effect.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_u8, parse_or_default};
 use nom::IResult;
 
@@ -27,14 +27,14 @@ fn sound_data(input: &[u8]) -> IResult<&[u8], SoundData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Soun<'a> {
-    pub id: &'a L1Str,
-    pub filename: &'a L1Str,
+pub struct Soun {
+    pub id: L1String,
+    pub filename: L1String,
     pub data: SoundData,
 }
 
-impl<'a> Soun<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Soun<'a> {
+impl Soun {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Soun {
         let mut out = Soun::default();
         for sub in subs {
             match &sub.tag {

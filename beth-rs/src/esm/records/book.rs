@@ -1,6 +1,6 @@
 //! `BOOK` — a book or scroll.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_f32, le_i32, le_u32, parse_or_default};
 use nom::IResult;
 
@@ -34,19 +34,19 @@ fn book_data(input: &[u8]) -> IResult<&[u8], BookData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Book<'a> {
-    pub id: &'a L1Str,
-    pub model: &'a L1Str,
-    pub name: Option<&'a L1Str>,
+pub struct Book {
+    pub id: L1String,
+    pub model: L1String,
+    pub name: Option<L1String>,
     pub data: BookData,
-    pub script: Option<&'a L1Str>,
-    pub icon: Option<&'a L1Str>,
-    pub text: Option<&'a L1Str>,
-    pub enchantment: Option<&'a L1Str>,
+    pub script: Option<L1String>,
+    pub icon: Option<L1String>,
+    pub text: Option<L1String>,
+    pub enchantment: Option<L1String>,
 }
 
-impl<'a> Book<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Book<'a> {
+impl Book {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Book {
         let mut out = Book::default();
         for sub in subs {
             match &sub.tag {

@@ -1,6 +1,6 @@
 //! `RACE` — a character race.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_f32, le_i32, le_u32, parse_or_default};
 use nom::IResult;
 
@@ -59,17 +59,17 @@ fn race_data(input: &[u8]) -> IResult<&[u8], RaceData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Race<'a> {
-    pub id: &'a L1Str,
-    pub name: Option<&'a L1Str>,
+pub struct Race {
+    pub id: L1String,
+    pub name: Option<L1String>,
     pub data: RaceData,
     /// Special power / ability spell IDs.
-    pub powers: Vec<&'a L1Str>,
-    pub description: Option<&'a L1Str>,
+    pub powers: Vec<L1String>,
+    pub description: Option<L1String>,
 }
 
-impl<'a> Race<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Race<'a> {
+impl Race {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Race {
         let mut out = Race::default();
         for sub in subs {
             match &sub.tag {

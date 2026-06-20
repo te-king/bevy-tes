@@ -1,20 +1,20 @@
 //! `SNDG` — a sound generator.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, finish, le_u32};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Sndg<'a> {
-    pub id: &'a L1Str,
+pub struct Sndg {
+    pub id: L1String,
     /// Sound type (0 = Left Foot … 7 = Land).
     pub kind: u32,
-    pub creature: Option<&'a L1Str>,
+    pub creature: Option<L1String>,
     /// Sound ID string.
-    pub sound: Option<&'a L1Str>,
+    pub sound: Option<L1String>,
 }
 
-impl<'a> Sndg<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Sndg<'a> {
+impl Sndg {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Sndg {
         let mut out = Sndg::default();
         for sub in subs {
             match &sub.tag {

@@ -1,6 +1,6 @@
 //! `SKIL` — a character skill.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, finish, le_f32, le_u32, parse_or_default};
 use nom::IResult;
 
@@ -33,15 +33,15 @@ fn skill_data(input: &[u8]) -> IResult<&[u8], SkillData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Skil<'a> {
+pub struct Skil {
     /// Skill index (the skill's identity; names are hardcoded in the engine).
     pub index: u32,
     pub data: SkillData,
-    pub description: Option<&'a L1Str>,
+    pub description: Option<L1String>,
 }
 
-impl<'a> Skil<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Skil<'a> {
+impl Skil {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Skil {
         let mut out = Skil::default();
         for sub in subs {
             match &sub.tag {

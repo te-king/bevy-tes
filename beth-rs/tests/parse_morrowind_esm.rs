@@ -9,8 +9,8 @@ use beth_rs::{Plugin, Record};
 
 const ESM_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Morrowind.esm");
 
-/// Read the file into an owned buffer. Parsing borrows from this buffer, so each test
-/// keeps it alive for the duration of the parsed `Plugin`.
+/// Read the file into an owned buffer to parse. The parsed `Plugin` owns its data, so it
+/// no longer depends on this buffer once parsing returns.
 fn load_bytes() -> Vec<u8> {
     std::fs::read(ESM_PATH).expect("Morrowind.esm should be readable")
 }
@@ -24,7 +24,7 @@ fn header_is_decoded() {
         plugin.header.flags & 0x1 != 0,
         "ESM should be flagged master"
     );
-    assert_eq!(plugin.header.company, "Bethesda Softworks"); // L1Str: PartialEq<&str>
+    assert_eq!(plugin.header.company, "Bethesda Softworks"); // L1String: PartialEq<&str>
     // The header declares the number of records that follow it.
     assert_eq!(plugin.header.num_records as usize, plugin.records.len() - 1);
 }
@@ -133,8 +133,8 @@ fn strings_are_stored_undecoded_and_decode_lazily() {
     use std::borrow::Cow;
     let bytes = load_bytes();
     let plugin = Plugin::parse(&bytes).unwrap();
-    // The L1Str borrows the raw Windows-1252 bytes directly from the buffer; the parser
-    // never transcoded them.
+    // The L1String stores the raw Windows-1252 bytes as-is; the parser never transcoded
+    // them.
     assert_eq!(plugin.header.company.as_bytes(), b"Bethesda Softworks");
     // Decoding the ASCII name on demand still borrows rather than allocating.
     assert!(matches!(plugin.header.company.decode(), Cow::Borrowed(_)));

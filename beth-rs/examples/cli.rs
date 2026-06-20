@@ -165,8 +165,8 @@ fn run_extract(archive: &Path, name: &str, out: Option<&Path>) -> ExitCode {
     };
 
     let result = match out {
-        Some(path) => std::fs::write(path, file.data),
-        None => std::io::stdout().write_all(file.data),
+        Some(path) => std::fs::write(path, &file.data),
+        None => std::io::stdout().write_all(&file.data),
     };
     if let Err(e) = result {
         eprintln!("failed to write output: {e}");
@@ -202,7 +202,7 @@ fn run_extract_all(archive: &Path, out_dir: &Path) -> ExitCode {
                 return fail(parent, &e);
             }
         }
-        if let Err(e) = std::fs::write(&dest, f.data) {
+        if let Err(e) = std::fs::write(&dest, &f.data) {
             return fail(&dest, &e);
         }
         files += 1;

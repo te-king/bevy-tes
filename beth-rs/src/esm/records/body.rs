@@ -1,6 +1,6 @@
 //! `BODY` — a body part.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_u8, parse_or_default};
 use nom::IResult;
 
@@ -32,16 +32,16 @@ fn body_data(input: &[u8]) -> IResult<&[u8], BodyData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Body<'a> {
-    pub id: &'a L1Str,
-    pub model: &'a L1Str,
+pub struct Body {
+    pub id: L1String,
+    pub model: L1String,
     /// Race this body part belongs to.
-    pub race: &'a L1Str,
+    pub race: L1String,
     pub data: BodyData,
 }
 
-impl<'a> Body<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Body<'a> {
+impl Body {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Body {
         let mut out = Body::default();
         for sub in subs {
             match &sub.tag {

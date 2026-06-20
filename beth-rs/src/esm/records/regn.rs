@@ -1,6 +1,6 @@
 //! `REGN` — a world region.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Color, Subrecord, color, l1, finish, fixed_l1str, le_u8};
 use nom::IResult;
 
@@ -48,30 +48,30 @@ fn weather(input: &[u8]) -> IResult<&[u8], WeatherChances> {
 
 /// A sound that may play in the region (`SNAM`, 33 bytes).
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct SoundChance<'a> {
-    pub sound: &'a L1Str,
+pub struct SoundChance {
+    pub sound: L1String,
     pub chance: u8,
 }
 
-fn sound_chance(input: &[u8]) -> IResult<&[u8], SoundChance<'_>> {
+fn sound_chance(input: &[u8]) -> IResult<&[u8], SoundChance> {
     let (input, sound) = fixed_l1str(32)(input)?;
     let (input, chance) = le_u8(input)?;
     Ok((input, SoundChance { sound, chance }))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Regn<'a> {
-    pub id: &'a L1Str,
-    pub name: &'a L1Str,
+pub struct Regn {
+    pub id: L1String,
+    pub name: L1String,
     pub weather: WeatherChances,
     /// Creature spawned while sleeping.
-    pub sleep_creature: Option<&'a L1Str>,
+    pub sleep_creature: Option<L1String>,
     pub map_color: Color,
-    pub sounds: Vec<SoundChance<'a>>,
+    pub sounds: Vec<SoundChance>,
 }
 
-impl<'a> Regn<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Regn<'a> {
+impl Regn {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Regn {
         let mut out = Regn::default();
         for sub in subs {
             match &sub.tag {

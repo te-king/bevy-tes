@@ -1,19 +1,19 @@
 //! `GLOB` — a global variable.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, finish, le_f32};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Glob<'a> {
-    pub id: &'a L1Str,
+pub struct Glob {
+    pub id: L1String,
     /// Variable type character: `s` = short, `l` = long, `f` = float.
     pub kind: Option<char>,
     /// Value (all globals are stored as floats regardless of declared type).
     pub value: f32,
 }
 
-impl<'a> Glob<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Glob<'a> {
+impl Glob {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Glob {
         let mut out = Glob::default();
         for sub in subs {
             match &sub.tag {

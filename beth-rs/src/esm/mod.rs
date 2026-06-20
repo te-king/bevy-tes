@@ -1,9 +1,10 @@
 //! TES3 (Morrowind) plugin format parsing.
 //!
 //! A plugin file is a flat sequence of records: a leading [`Tes3`](records::tes3::Tes3)
-//! header followed by content records. Parsing is zero-copy — the parsed [`Plugin`] and
-//! its records borrow strings and binary blobs directly from the input buffer, which
-//! must therefore outlive the `Plugin`:
+//! header followed by content records. Parsing copies into owned structures: the parsed
+//! [`Plugin`] and its records own their strings ([`L1String`](crate::L1String)) and
+//! binary blobs, so the `Plugin` is `'static` and the input buffer is only borrowed for
+//! the duration of the parse call:
 //!
 //! ```no_run
 //! let bytes = std::fs::read("beth-rs/assets/Morrowind.esm").unwrap();
@@ -30,62 +31,62 @@ use records::{
 };
 
 /// A single parsed record. One variant per known TES3 record type, plus [`Record::Unknown`]
-/// as a safety net for tags not modeled by this crate. Records borrow from the input
-/// buffer (lifetime `'a`).
+/// as a safety net for tags not modeled by this crate. Records own their data and are
+/// `'static`.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Record<'a> {
-    Tes3(Tes3<'a>),
-    Gmst(Gmst<'a>),
-    Glob(Glob<'a>),
-    Clas(Clas<'a>),
-    Fact(Fact<'a>),
-    Race(Race<'a>),
-    Soun(Soun<'a>),
-    Skil(Skil<'a>),
-    Mgef(Mgef<'a>),
-    Scpt(Scpt<'a>),
-    Regn(Regn<'a>),
-    Bsgn(Bsgn<'a>),
-    Ltex(Ltex<'a>),
-    Stat(Stat<'a>),
-    Door(Door<'a>),
-    Misc(Misc<'a>),
-    Weap(Weap<'a>),
-    Cont(Cont<'a>),
-    Spel(Spel<'a>),
-    Crea(Crea<'a>),
-    Body(Body<'a>),
-    Ligh(Ligh<'a>),
-    Ench(Ench<'a>),
-    Npc(Npc<'a>),
-    Armo(Armo<'a>),
-    Clot(Clot<'a>),
-    Repa(Repa<'a>),
-    Acti(Acti<'a>),
-    Appa(Appa<'a>),
-    Lock(Lock<'a>),
-    Prob(Prob<'a>),
-    Ingr(Ingr<'a>),
-    Book(Book<'a>),
-    Alch(Alch<'a>),
-    Levi(Levi<'a>),
-    Levc(Levc<'a>),
-    Cell(Cell<'a>),
-    Land(Land<'a>),
-    Pgrd(Pgrd<'a>),
-    Sndg(Sndg<'a>),
-    Dial(Dial<'a>),
-    Info(Info<'a>),
-    Sscr(Sscr<'a>),
+pub enum Record {
+    Tes3(Tes3),
+    Gmst(Gmst),
+    Glob(Glob),
+    Clas(Clas),
+    Fact(Fact),
+    Race(Race),
+    Soun(Soun),
+    Skil(Skil),
+    Mgef(Mgef),
+    Scpt(Scpt),
+    Regn(Regn),
+    Bsgn(Bsgn),
+    Ltex(Ltex),
+    Stat(Stat),
+    Door(Door),
+    Misc(Misc),
+    Weap(Weap),
+    Cont(Cont),
+    Spel(Spel),
+    Crea(Crea),
+    Body(Body),
+    Ligh(Ligh),
+    Ench(Ench),
+    Npc(Npc),
+    Armo(Armo),
+    Clot(Clot),
+    Repa(Repa),
+    Acti(Acti),
+    Appa(Appa),
+    Lock(Lock),
+    Prob(Prob),
+    Ingr(Ingr),
+    Book(Book),
+    Alch(Alch),
+    Levi(Levi),
+    Levc(Levc),
+    Cell(Cell),
+    Land(Land),
+    Pgrd(Pgrd),
+    Sndg(Sndg),
+    Dial(Dial),
+    Info(Info),
+    Sscr(Sscr),
     /// A record whose 4-byte tag is not recognized; its raw payload is preserved.
     Unknown {
         tag: Tag,
         flags: RecordFlags,
-        data: &'a [u8],
+        data: Vec<u8>,
     },
 }
 
-impl<'a> Record<'a> {
+impl Record {
     /// The 4-byte tag of this record.
     pub fn tag(&self) -> Tag {
         match self {
@@ -137,7 +138,7 @@ impl<'a> Record<'a> {
     }
 
     /// Build a typed record from its tag, header flags and data block.
-    fn from_parts(tag: Tag, flags: RecordFlags, data: &'a [u8]) -> Record<'a> {
+    fn from_parts(tag: Tag, flags: RecordFlags, data: &[u8]) -> Record {
         // Subrecords are parsed lazily from `data`; a malformed/truncated subrecord just
         // ends iteration (the record keeps whatever fields parsed before it). Only one
         // match arm runs, so moving `subs` into it is fine.
@@ -186,27 +187,27 @@ impl<'a> Record<'a> {
             b"DIAL" => Record::Dial(Dial::from_subrecords(subs)),
             b"INFO" => Record::Info(Info::from_subrecords(subs)),
             b"SSCR" => Record::Sscr(Sscr::from_subrecords(subs)),
-            _ => Record::Unknown { tag, flags, data },
+            _ => Record::Unknown { tag, flags, data: data.to_vec() },
         }
     }
 }
 
-/// A fully parsed TES3 plugin (`.esm`/`.esp`), borrowing from the source buffer.
+/// A fully parsed TES3 plugin (`.esm`/`.esp`). Owns all of its data, so it is `'static`.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Plugin<'a> {
+pub struct Plugin {
     /// The leading `TES3` header record.
-    pub header: Tes3<'a>,
+    pub header: Tes3,
     /// All content records following the header, in file order.
-    pub records: Vec<Record<'a>>,
+    pub records: Vec<Record>,
 }
 
-impl<'a> Plugin<'a> {
-    /// Parse a plugin from an in-memory byte slice. The returned [`Plugin`] borrows from
-    /// `input`, so read the file into a buffer that outlives it (see the module example).
-    pub fn parse(input: &'a [u8]) -> Result<Plugin<'a>, EsmError> {
+impl Plugin {
+    /// Parse a plugin from an in-memory byte slice. The returned [`Plugin`] owns its data
+    /// (copied out of `input`), so it does not borrow `input` after this returns.
+    pub fn parse(input: &[u8]) -> Result<Plugin, EsmError> {
         let mut remaining = input;
         let mut records = Vec::new();
-        let mut header: Option<Tes3<'a>> = None;
+        let mut header: Option<Tes3> = None;
 
         while !remaining.is_empty() {
             let (rest, hdr) = record_header(remaining)

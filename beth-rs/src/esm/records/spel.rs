@@ -1,6 +1,6 @@
 //! `SPEL` — a spell.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_u32, parse_or_default};
 use crate::esm::shared::{Effect, effect};
 use nom::IResult;
@@ -22,15 +22,15 @@ fn spell_data(input: &[u8]) -> IResult<&[u8], SpellData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Spel<'a> {
-    pub id: &'a L1Str,
-    pub name: Option<&'a L1Str>,
+pub struct Spel {
+    pub id: L1String,
+    pub name: Option<L1String>,
     pub data: SpellData,
     pub effects: Vec<Effect>,
 }
 
-impl<'a> Spel<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Spel<'a> {
+impl Spel {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Spel {
         let mut out = Spel::default();
         for sub in subs {
             match &sub.tag {

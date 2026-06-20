@@ -2,9 +2,9 @@
 //!
 //! Each exterior cell defines 65×65 arrays of vertex heights, normals and colors plus
 //! a 16×16 texture-index grid and a 9×9 world-map height grid. These large arrays are
-//! borrowed directly from the source buffer (zero-copy); the height grid is
-//! delta-encoded per the format. Signed `i8` arrays are exposed as raw `&[u8]` bytes
-//! (reinterpret with `as i8`), and the `u16` texture grid via [`Land::texture_indices`].
+//! kept as owned `Vec<u8>` byte blobs; the height grid is delta-encoded per the format.
+//! Signed `i8` arrays are exposed as raw bytes (reinterpret with `as i8`), and the `u16`
+//! texture grid via [`Land::texture_indices`].
 
 use crate::esm::common::{Subrecord, finish, le_f32, le_i32, le_u32};
 use nom::IResult;
@@ -15,23 +15,23 @@ pub const LAND_HAS_COLORS: u32 = 0x02; // VCLR
 pub const LAND_HAS_TEXTURES: u32 = 0x04; // VTEX
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Land<'a> {
+pub struct Land {
     pub grid_x: i32,
     pub grid_y: i32,
     /// Bitfield describing which arrays below are populated.
     pub data_types: u32,
     /// 65×65×3 vertex normals (`VNML`), as raw signed bytes.
-    pub normals: Option<&'a [u8]>,
+    pub normals: Option<Vec<u8>>,
     /// Per-cell height offset from `VHGT`.
     pub height_offset: Option<f32>,
     /// 65×65 delta-encoded vertex heights from `VHGT`, as raw signed bytes.
-    pub heights: Option<&'a [u8]>,
+    pub heights: Option<Vec<u8>>,
     /// 9×9 world-map heights (`WNAM`).
-    pub world_map_heights: Option<&'a [u8]>,
+    pub world_map_heights: Option<Vec<u8>>,
     /// 65×65×3 vertex colors (`VCLR`).
-    pub colors: Option<&'a [u8]>,
+    pub colors: Option<Vec<u8>>,
     /// Raw 16×16 texture-index grid bytes (`VTEX`); decode via [`Land::texture_indices`].
-    pub texture_data: Option<&'a [u8]>,
+    pub texture_data: Option<Vec<u8>>,
 }
 
 fn coords(input: &[u8]) -> IResult<&[u8], (i32, i32)> {
@@ -48,8 +48,8 @@ fn vhgt(input: &[u8]) -> IResult<&[u8], (f32, &[u8])> {
     Ok((&rest[heights_end..], (offset, &rest[..heights_end])))
 }
 
-impl<'a> Land<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Land<'a> {
+impl Land {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Land {
         let mut out = Land::default();
         for sub in subs {
             match &sub.tag {
@@ -60,16 +60,16 @@ impl<'a> Land<'a> {
                     }
                 }
                 b"DATA" => out.data_types = finish(le_u32(sub.data)).unwrap_or(0),
-                b"VNML" => out.normals = Some(sub.data),
+                b"VNML" => out.normals = Some(sub.data.to_vec()),
                 b"VHGT" => {
                     if let Some((offset, heights)) = finish(vhgt(sub.data)) {
                         out.height_offset = Some(offset);
-                        out.heights = Some(heights);
+                        out.heights = Some(heights.to_vec());
                     }
                 }
-                b"WNAM" => out.world_map_heights = Some(sub.data),
-                b"VCLR" => out.colors = Some(sub.data),
-                b"VTEX" => out.texture_data = Some(sub.data),
+                b"WNAM" => out.world_map_heights = Some(sub.data.to_vec()),
+                b"VCLR" => out.colors = Some(sub.data.to_vec()),
+                b"VTEX" => out.texture_data = Some(sub.data.to_vec()),
                 _ => {}
             }
         }
@@ -80,6 +80,7 @@ impl<'a> Land<'a> {
     /// guaranteed to be 2-byte aligned, so they are read rather than transmuted).
     pub fn texture_indices(&self) -> impl Iterator<Item = u16> + '_ {
         self.texture_data
+            .as_deref()
             .unwrap_or(&[])
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))

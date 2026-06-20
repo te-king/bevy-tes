@@ -1,6 +1,6 @@
 //! `NPC_` — a non-player character.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{
     Subrecord, l1, finish, fixed_l1str, le_u16, le_u32, parse_or_default,
 };
@@ -109,28 +109,28 @@ fn npc_full(input: &[u8]) -> IResult<&[u8], NpcStats> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Npc<'a> {
-    pub id: &'a L1Str,
-    pub model: Option<&'a L1Str>,
-    pub name: Option<&'a L1Str>,
-    pub race: &'a L1Str,
-    pub class: &'a L1Str,
-    pub faction: Option<&'a L1Str>,
-    pub head_model: &'a L1Str,
-    pub hair_model: Option<&'a L1Str>,
-    pub script: Option<&'a L1Str>,
+pub struct Npc {
+    pub id: L1String,
+    pub model: Option<L1String>,
+    pub name: Option<L1String>,
+    pub race: L1String,
+    pub class: L1String,
+    pub faction: Option<L1String>,
+    pub head_model: L1String,
+    pub hair_model: Option<L1String>,
+    pub script: Option<L1String>,
     pub stats: NpcStats,
     /// `0x1` = Female, `0x2` = Essential, `0x10` = Autocalc, etc.
     pub flags: u32,
-    pub inventory: Vec<InventoryItem<'a>>,
-    pub spells: Vec<&'a L1Str>,
+    pub inventory: Vec<InventoryItem>,
+    pub spells: Vec<L1String>,
     pub ai_data: Option<AiData>,
-    pub destinations: Vec<TravelDestination<'a>>,
-    pub ai_packages: Vec<AiPackage<'a>>,
+    pub destinations: Vec<TravelDestination>,
+    pub ai_packages: Vec<AiPackage>,
 }
 
-impl<'a> Npc<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Npc<'a> {
+impl Npc {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Npc {
         let mut out = Npc::default();
         for sub in subs {
             match &sub.tag {
@@ -181,13 +181,13 @@ impl<'a> Npc<'a> {
     }
 }
 
-fn push_pkg<'a>(packages: &mut Vec<AiPackage<'a>>, pkg: Option<AiPackage<'a>>) {
+fn push_pkg(packages: &mut Vec<AiPackage>, pkg: Option<AiPackage>) {
     if let Some(pkg) = pkg {
         packages.push(pkg);
     }
 }
 
-fn attach_cell<'a>(packages: &mut [AiPackage<'a>], cell: &'a L1Str) {
+fn attach_cell(packages: &mut [AiPackage], cell: L1String) {
     if let Some(AiPackage::Escort { cell: c, .. } | AiPackage::Follow { cell: c, .. }) =
         packages.last_mut()
     {

@@ -1,26 +1,26 @@
 //! `LEVC` — a leveled creature list.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, finish, le_u16, le_u32};
 
 /// One entry in a leveled creature list.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct LeveledCreature<'a> {
-    pub creature: &'a L1Str,
+pub struct LeveledCreature {
+    pub creature: L1String,
     pub level: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Levc<'a> {
-    pub id: &'a L1Str,
+pub struct Levc {
+    pub id: L1String,
     /// `0x1` = calc from all levels ≤ PC level.
     pub flags: u32,
     pub chance_none: u8,
-    pub creatures: Vec<LeveledCreature<'a>>,
+    pub creatures: Vec<LeveledCreature>,
 }
 
-impl<'a> Levc<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Levc<'a> {
+impl Levc {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Levc {
         let mut out = Levc::default();
         for sub in subs {
             match &sub.tag {

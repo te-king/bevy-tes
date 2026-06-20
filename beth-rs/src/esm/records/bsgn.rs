@@ -1,21 +1,21 @@
 //! `BSGN` — a birthsign.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Bsgn<'a> {
-    pub id: &'a L1Str,
-    pub name: Option<&'a L1Str>,
+pub struct Bsgn {
+    pub id: L1String,
+    pub name: Option<L1String>,
     /// Spell/ability IDs granted by the birthsign.
-    pub spells: Vec<&'a L1Str>,
+    pub spells: Vec<L1String>,
     /// Texture file name.
-    pub texture: Option<&'a L1Str>,
-    pub description: Option<&'a L1Str>,
+    pub texture: Option<L1String>,
+    pub description: Option<L1String>,
 }
 
-impl<'a> Bsgn<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Bsgn<'a> {
+impl Bsgn {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Bsgn {
         let mut out = Bsgn::default();
         for sub in subs {
             match &sub.tag {

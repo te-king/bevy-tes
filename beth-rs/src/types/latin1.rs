@@ -157,6 +157,20 @@ impl From<&L1Str> for L1String {
     }
 }
 
+/// Compare an owned string against a UTF-8 `str`, decoding as needed (mirrors the
+/// matching [`L1Str`] impls so owned fields can be compared to string literals).
+impl PartialEq<str> for L1String {
+    fn eq(&self, other: &str) -> bool {
+        self.as_l1str() == other
+    }
+}
+
+impl PartialEq<&str> for L1String {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_l1str() == *other
+    }
+}
+
 impl fmt::Debug for L1String {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.as_l1str(), f)

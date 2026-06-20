@@ -1,6 +1,6 @@
 //! `CLOT` — an item of clothing.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_f32, le_u16, le_u32, parse_or_default};
 use crate::esm::shared::BipedItem;
 use nom::IResult;
@@ -31,19 +31,19 @@ fn clothing_data(input: &[u8]) -> IResult<&[u8], ClothingData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Clot<'a> {
-    pub id: &'a L1Str,
-    pub model: &'a L1Str,
-    pub name: Option<&'a L1Str>,
+pub struct Clot {
+    pub id: L1String,
+    pub model: L1String,
+    pub name: Option<L1String>,
     pub data: ClothingData,
-    pub script: Option<&'a L1Str>,
-    pub icon: Option<&'a L1Str>,
-    pub biped: Vec<BipedItem<'a>>,
-    pub enchantment: Option<&'a L1Str>,
+    pub script: Option<L1String>,
+    pub icon: Option<L1String>,
+    pub biped: Vec<BipedItem>,
+    pub enchantment: Option<L1String>,
 }
 
-impl<'a> Clot<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Clot<'a> {
+impl Clot {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Clot {
         let mut out = Clot::default();
         for sub in subs {
             match &sub.tag {

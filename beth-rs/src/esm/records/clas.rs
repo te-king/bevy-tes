@@ -1,6 +1,6 @@
 //! `CLAS` — a character class.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_u32, parse_or_default};
 use nom::IResult;
 
@@ -45,15 +45,15 @@ fn class_data(input: &[u8]) -> IResult<&[u8], ClassData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Clas<'a> {
-    pub id: &'a L1Str,
-    pub name: &'a L1Str,
+pub struct Clas {
+    pub id: L1String,
+    pub name: L1String,
     pub data: ClassData,
-    pub description: Option<&'a L1Str>,
+    pub description: Option<L1String>,
 }
 
-impl<'a> Clas<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Clas<'a> {
+impl Clas {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Clas {
         let mut out = Clas::default();
         for sub in subs {
             match &sub.tag {

@@ -1,22 +1,22 @@
 //! `DOOR` — a door.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Door<'a> {
-    pub id: &'a L1Str,
-    pub model: &'a L1Str,
-    pub name: Option<&'a L1Str>,
-    pub script: Option<&'a L1Str>,
+pub struct Door {
+    pub id: L1String,
+    pub model: L1String,
+    pub name: Option<L1String>,
+    pub script: Option<L1String>,
     /// Sound played when opening.
-    pub open_sound: Option<&'a L1Str>,
+    pub open_sound: Option<L1String>,
     /// Sound played when closing.
-    pub close_sound: Option<&'a L1Str>,
+    pub close_sound: Option<L1String>,
 }
 
-impl<'a> Door<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Door<'a> {
+impl Door {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Door {
         let mut out = Door::default();
         for sub in subs {
             match &sub.tag {

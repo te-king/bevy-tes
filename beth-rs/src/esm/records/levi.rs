@@ -1,27 +1,27 @@
 //! `LEVI` — a leveled item list.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, finish, le_u16, le_u32};
 
 /// One entry in a leveled list: an item ID and the PC level it becomes available at.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct LeveledItem<'a> {
-    pub item: &'a L1Str,
+pub struct LeveledItem {
+    pub item: L1String,
     pub level: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Levi<'a> {
-    pub id: &'a L1Str,
+pub struct Levi {
+    pub id: L1String,
     /// `0x1` = calc for each item in count, `0x2` = calc from all levels ≤ PC level.
     pub flags: u32,
     /// Chance that nothing is produced.
     pub chance_none: u8,
-    pub items: Vec<LeveledItem<'a>>,
+    pub items: Vec<LeveledItem>,
 }
 
-impl<'a> Levi<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Levi<'a> {
+impl Levi {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Levi {
         let mut out = Levi::default();
         for sub in subs {
             match &sub.tag {

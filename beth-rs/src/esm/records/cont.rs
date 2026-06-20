@@ -1,23 +1,23 @@
 //! `CONT` — a container.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, finish, le_f32, le_u32, parse_or_default};
 use crate::esm::shared::{InventoryItem, inventory_item};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Cont<'a> {
-    pub id: &'a L1Str,
-    pub model: &'a L1Str,
-    pub name: Option<&'a L1Str>,
+pub struct Cont {
+    pub id: L1String,
+    pub model: L1String,
+    pub name: Option<L1String>,
     pub weight: f32,
     /// `0x1` = Organic, `0x2` = Respawns, `0x8` = Unknown (always set).
     pub flags: u32,
-    pub items: Vec<InventoryItem<'a>>,
-    pub script: Option<&'a L1Str>,
+    pub items: Vec<InventoryItem>,
+    pub script: Option<L1String>,
 }
 
-impl<'a> Cont<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Cont<'a> {
+impl Cont {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Cont {
         let mut out = Cont::default();
         for sub in subs {
             match &sub.tag {

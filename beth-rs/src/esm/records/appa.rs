@@ -1,6 +1,6 @@
 //! `APPA` — an alchemy apparatus.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
 use nom::IResult;
 
@@ -30,17 +30,17 @@ fn apparatus_data(input: &[u8]) -> IResult<&[u8], ApparatusData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Appa<'a> {
-    pub id: &'a L1Str,
-    pub model: Option<&'a L1Str>,
-    pub name: Option<&'a L1Str>,
-    pub script: Option<&'a L1Str>,
+pub struct Appa {
+    pub id: L1String,
+    pub model: Option<L1String>,
+    pub name: Option<L1String>,
+    pub script: Option<L1String>,
     pub data: Option<ApparatusData>,
-    pub icon: Option<&'a L1Str>,
+    pub icon: Option<L1String>,
 }
 
-impl<'a> Appa<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Appa<'a> {
+impl Appa {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Appa {
         let mut out = Appa::default();
         for sub in subs {
             match &sub.tag {

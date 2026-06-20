@@ -26,17 +26,16 @@ fn parses_archive() {
 }
 
 #[test]
-fn entry_data_is_in_bounds_and_named() {
+fn every_entry_has_a_name_and_data() {
     let bytes = load();
     let bsa = Bsa::parse(&bytes).unwrap();
-    let base = bytes.as_ptr() as usize;
-    let end = base + bytes.len();
+    // Entries own their bytes now, so there is no source buffer to bounds-check against;
+    // instead confirm the directory decoded into named entries holding actual data.
     for f in &bsa.files {
         assert!(!f.name.is_empty(), "every entry should have a name");
-        // The borrowed data slice points inside the archive buffer.
-        let start = f.data.as_ptr() as usize;
-        assert!(start >= base && start + f.data.len() <= end);
     }
+    let total: usize = bsa.files.iter().map(|f| f.data.len()).sum();
+    assert!(total > 0, "archive should contain file data");
 }
 
 #[test]
@@ -87,7 +86,7 @@ fn parse_timing() {
         let bsa = Bsa::parse(&bytes).expect("parse should succeed");
         let mut acc = 0u64;
         for f in &bsa.files {
-            acc = fold(acc, f.data);
+            acc = fold(acc, &f.data);
         }
         let elapsed = start.elapsed();
         checksum ^= acc;

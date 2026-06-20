@@ -1,18 +1,18 @@
 //! `ACTI` — an activator.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Acti<'a> {
-    pub id: &'a L1Str,
-    pub model: &'a L1Str,
-    pub name: Option<&'a L1Str>,
-    pub script: Option<&'a L1Str>,
+pub struct Acti {
+    pub id: L1String,
+    pub model: L1String,
+    pub name: Option<L1String>,
+    pub script: Option<L1String>,
 }
 
-impl<'a> Acti<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Acti<'a> {
+impl Acti {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Acti {
         let mut out = Acti::default();
         for sub in subs {
             match &sub.tag {

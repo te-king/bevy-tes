@@ -67,7 +67,7 @@ fn parse_timing() {
         let bsa = Bsa::parse(&bytes).expect("parse should succeed");
         let mut acc = 0u64;
         for f in &bsa.files {
-            acc = fold(acc, f.data);
+            acc = fold(acc, &f.data);
         }
         let elapsed = start.elapsed();
         checksum ^= acc;

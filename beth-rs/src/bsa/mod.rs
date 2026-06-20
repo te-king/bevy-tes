@@ -1,9 +1,9 @@
 //! TES3 (Morrowind) BSA archive parsing.
 //!
 //! A BSA is a flat archive: a small directory (file sizes, offsets, names and lookup
-//! hashes) followed by the concatenated file data. Parsing is zero-copy — each
-//! [`FileEntry`] borrows its bytes directly from the archive buffer, which must outlive
-//! the [`Bsa`]:
+//! hashes) followed by the concatenated file data. Parsing copies each file out: every
+//! [`FileEntry`] owns its bytes, so the parsed [`Bsa`] is `'static` and the archive
+//! buffer is only borrowed for the duration of the parse call:
 //!
 //! ```no_run
 //! let bytes = std::fs::read("beth-rs/tests/Morrowind.bsa").unwrap();
@@ -13,7 +13,7 @@
 //! }
 //! ```
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use nom::IResult;
 use nom::bytes::complete::take;
 use nom::number::complete::le_u32;
@@ -48,24 +48,25 @@ impl From<std::io::Error> for BsaError {
     }
 }
 
-/// A single archived file: its name, its bytes (borrowed from the archive) and the
-/// 64-bit lookup hash stored in the directory.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FileEntry<'a> {
+/// A single archived file: its name, its (owned) bytes and the 64-bit lookup hash stored
+/// in the directory.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileEntry {
     /// Path within the archive, e.g. `meshes\m\probe_journeyman_01.nif` (Windows-1252,
     /// backslash-separated).
-    pub name: &'a L1Str,
+    pub name: L1String,
     /// The file's raw contents.
-    pub data: &'a [u8],
+    pub data: Vec<u8>,
     /// The directory's precomputed lookup hash for `name`.
     pub hash: u64,
 }
 
-/// A parsed TES3 BSA archive, borrowing from the source buffer.
+/// A parsed TES3 BSA archive. Owns its entries' names and bytes, so it is `'static` and
+/// outlives the buffer it was parsed from.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Bsa<'a> {
+pub struct Bsa {
     pub version: u32,
-    pub files: Vec<FileEntry<'a>>,
+    pub files: Vec<FileEntry>,
 }
 
 /// Read a little-endian `u32` from a fixed position in an exact-length block.
@@ -73,11 +74,11 @@ fn u32_at(block: &[u8], byte: usize) -> u32 {
     u32::from_le_bytes(block[byte..byte + 4].try_into().expect("4 bytes"))
 }
 
-impl<'a> Bsa<'a> {
-    /// Parse an archive from an in-memory byte slice. The returned [`Bsa`] borrows from
-    /// `input`, so keep the buffer alive for as long as the archive is used.
-    pub fn parse(input: &'a [u8]) -> Result<Bsa<'a>, BsaError> {
-        let parse = |input| -> IResult<&'a [u8], Bsa<'a>> {
+impl Bsa {
+    /// Parse an archive from an in-memory byte slice. The returned [`Bsa`] owns its data
+    /// (copied out of `input`), so it does not borrow `input` after this returns.
+    pub fn parse(input: &[u8]) -> Result<Bsa, BsaError> {
+        let parse = |input| -> IResult<&[u8], Bsa> {
             let (input, version) = le_u32(input)?;
             let (input, hash_offset) = le_u32(input)?;
             let (input, count) = le_u32(input)?;
@@ -102,14 +103,14 @@ impl<'a> Bsa<'a> {
 
                 let name_bytes = names.get(name_off..).ok_or_else(|| nom_fail(data))?;
                 let end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
-                let name = L1Str::from_bytes(&name_bytes[..end]);
+                let name = L1String::from_bytes(name_bytes[..end].to_vec());
 
                 let file_data = data
                     .get(offset..offset + size)
                     .ok_or_else(|| nom_fail(data))?;
                 let hash = u64::from_le_bytes(hashes[i * 8..i * 8 + 8].try_into().unwrap());
 
-                files.push(FileEntry { name, data: file_data, hash });
+                files.push(FileEntry { name, data: file_data.to_vec(), hash });
             }
 
             Ok((data, Bsa { version, files }))
@@ -127,7 +128,7 @@ impl<'a> Bsa<'a> {
 
     /// Look up a file by path, case-insensitively and tolerant of `/` vs `\` separators.
     /// Linear scan; build your own index if you need many lookups.
-    pub fn get(&self, name: &str) -> Option<&FileEntry<'a>> {
+    pub fn get(&self, name: &str) -> Option<&FileEntry> {
         let key = normalize(name);
         self.files
             .iter()

@@ -1,6 +1,6 @@
 //! `ENCH` — an enchantment.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_u32, parse_or_default};
 use crate::esm::shared::{Effect, effect};
 use nom::IResult;
@@ -32,14 +32,14 @@ fn enchant_data(input: &[u8]) -> IResult<&[u8], EnchantData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Ench<'a> {
-    pub id: &'a L1Str,
+pub struct Ench {
+    pub id: L1String,
     pub data: EnchantData,
     pub effects: Vec<Effect>,
 }
 
-impl<'a> Ench<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ench<'a> {
+impl Ench {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Ench {
         let mut out = Ench::default();
         for sub in subs {
             match &sub.tag {

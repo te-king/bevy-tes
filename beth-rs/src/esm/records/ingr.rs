@@ -1,6 +1,6 @@
 //! `INGR` — an alchemy ingredient.
 
-use crate::types::latin1::L1Str;
+use crate::types::latin1::L1String;
 use crate::esm::common::{Subrecord, l1, le_f32, le_i32, le_u32, parse_or_default};
 use nom::IResult;
 
@@ -43,17 +43,17 @@ fn ingredient_data(input: &[u8]) -> IResult<&[u8], IngredientData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Ingr<'a> {
-    pub id: &'a L1Str,
-    pub model: &'a L1Str,
-    pub name: Option<&'a L1Str>,
+pub struct Ingr {
+    pub id: L1String,
+    pub model: L1String,
+    pub name: Option<L1String>,
     pub data: IngredientData,
-    pub script: Option<&'a L1Str>,
-    pub icon: Option<&'a L1Str>,
+    pub script: Option<L1String>,
+    pub icon: Option<L1String>,
 }
 
-impl<'a> Ingr<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ingr<'a> {
+impl Ingr {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Ingr {
         let mut out = Ingr::default();
         for sub in subs {
             match &sub.tag {
