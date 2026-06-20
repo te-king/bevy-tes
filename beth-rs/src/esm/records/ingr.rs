@@ -53,7 +53,7 @@ pub struct Ingr<'a> {
 }
 
 impl<'a> Ingr<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Ingr<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ingr<'a> {
         let mut out = Ingr::default();
         for sub in subs {
             match &sub.tag {

@@ -15,7 +15,7 @@ pub struct Bsgn<'a> {
 }
 
 impl<'a> Bsgn<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Bsgn<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Bsgn<'a> {
         let mut out = Bsgn::default();
         for sub in subs {
             match &sub.tag {

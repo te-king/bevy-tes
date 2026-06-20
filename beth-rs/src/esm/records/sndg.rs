@@ -14,7 +14,7 @@ pub struct Sndg<'a> {
 }
 
 impl<'a> Sndg<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Sndg<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Sndg<'a> {
         let mut out = Sndg::default();
         for sub in subs {
             match &sub.tag {

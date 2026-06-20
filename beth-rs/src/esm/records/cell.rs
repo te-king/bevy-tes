@@ -132,7 +132,7 @@ fn flush<'a>(
 }
 
 impl<'a> Cell<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Cell<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Cell<'a> {
         let mut out = Cell::default();
         let mut phase = Phase::Header;
         let mut current: Option<Reference<'a>> = None;
@@ -157,9 +157,9 @@ impl<'a> Cell<'a> {
                     phase = Phase::MovedHeader;
                 }
                 _ => match phase {
-                    Phase::Header => header_field(&mut out, sub),
-                    Phase::MovedHeader => moved_header_field(pending_move.as_mut(), sub),
-                    Phase::Reference => reference_field(current.as_mut(), sub),
+                    Phase::Header => header_field(&mut out, &sub),
+                    Phase::MovedHeader => moved_header_field(pending_move.as_mut(), &sub),
+                    Phase::Reference => reference_field(current.as_mut(), &sub),
                 },
             }
         }

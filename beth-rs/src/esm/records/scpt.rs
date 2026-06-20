@@ -46,7 +46,7 @@ pub struct Scpt<'a> {
 }
 
 impl<'a> Scpt<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Scpt<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Scpt<'a> {
         let mut out = Scpt::default();
         for sub in subs {
             match &sub.tag {

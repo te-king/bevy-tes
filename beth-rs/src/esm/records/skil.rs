@@ -41,7 +41,7 @@ pub struct Skil<'a> {
 }
 
 impl<'a> Skil<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Skil<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Skil<'a> {
         let mut out = Skil::default();
         for sub in subs {
             match &sub.tag {

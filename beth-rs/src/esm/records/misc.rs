@@ -37,7 +37,7 @@ pub struct Misc<'a> {
 }
 
 impl<'a> Misc<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Misc<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Misc<'a> {
         let mut out = Misc::default();
         for sub in subs {
             match &sub.tag {

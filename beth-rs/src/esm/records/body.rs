@@ -41,7 +41,7 @@ pub struct Body<'a> {
 }
 
 impl<'a> Body<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Body<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Body<'a> {
         let mut out = Body::default();
         for sub in subs {
             match &sub.tag {

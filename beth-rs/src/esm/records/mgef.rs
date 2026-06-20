@@ -64,7 +64,7 @@ pub struct Mgef<'a> {
 }
 
 impl<'a> Mgef<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Mgef<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Mgef<'a> {
         let mut out = Mgef::default();
         for sub in subs {
             match &sub.tag {

@@ -21,7 +21,7 @@ pub struct Gmst<'a> {
 }
 
 impl<'a> Gmst<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Gmst<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Gmst<'a> {
         let mut out = Gmst::default();
         for sub in subs {
             match &sub.tag {

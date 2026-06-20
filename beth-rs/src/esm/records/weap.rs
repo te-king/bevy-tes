@@ -72,7 +72,7 @@ pub struct Weap<'a> {
 }
 
 impl<'a> Weap<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Weap<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Weap<'a> {
         let mut out = Weap::default();
         for sub in subs {
             match &sub.tag {

@@ -74,7 +74,7 @@ pub struct Pgrd<'a> {
 }
 
 impl<'a> Pgrd<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Pgrd<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Pgrd<'a> {
         let mut out = Pgrd::default();
         for sub in subs {
             match &sub.tag {

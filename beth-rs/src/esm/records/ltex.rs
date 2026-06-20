@@ -13,7 +13,7 @@ pub struct Ltex<'a> {
 }
 
 impl<'a> Ltex<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Ltex<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ltex<'a> {
         let mut out = Ltex::default();
         for sub in subs {
             match &sub.tag {

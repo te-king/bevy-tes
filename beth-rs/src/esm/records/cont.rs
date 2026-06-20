@@ -17,7 +17,7 @@ pub struct Cont<'a> {
 }
 
 impl<'a> Cont<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Cont<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Cont<'a> {
         let mut out = Cont::default();
         for sub in subs {
             match &sub.tag {

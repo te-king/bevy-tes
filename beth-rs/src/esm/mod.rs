@@ -14,7 +14,7 @@ pub mod common;
 pub mod records;
 pub mod shared;
 
-use common::{EsmError, RecordFlags, Tag, record_header, subrecords};
+use common::{EsmError, RecordFlags, Subrecords, Tag, record_header};
 use nom::bytes::complete::take;
 
 pub use records::tes3::Tes3;
@@ -136,54 +136,53 @@ impl<'a> Record<'a> {
 
     /// Build a typed record from its tag, header flags and data block.
     fn from_parts(tag: Tag, flags: RecordFlags, data: &'a [u8]) -> Record<'a> {
-        // If the subrecord framing is somehow broken, keep the raw bytes.
-        let subs = match subrecords(data) {
-            Ok((_, subs)) => subs,
-            Err(_) => return Record::Unknown { tag, flags, data },
-        };
+        // Subrecords are parsed lazily from `data`; a malformed/truncated subrecord just
+        // ends iteration (the record keeps whatever fields parsed before it). Only one
+        // match arm runs, so moving `subs` into it is fine.
+        let subs = Subrecords::new(data);
         match &tag {
-            b"TES3" => Record::Tes3(Tes3::from_subrecords(&subs)),
-            b"GMST" => Record::Gmst(Gmst::from_subrecords(&subs)),
-            b"GLOB" => Record::Glob(Glob::from_subrecords(&subs)),
-            b"CLAS" => Record::Clas(Clas::from_subrecords(&subs)),
-            b"FACT" => Record::Fact(Fact::from_subrecords(&subs)),
-            b"RACE" => Record::Race(Race::from_subrecords(&subs)),
-            b"SOUN" => Record::Soun(Soun::from_subrecords(&subs)),
-            b"SKIL" => Record::Skil(Skil::from_subrecords(&subs)),
-            b"MGEF" => Record::Mgef(Mgef::from_subrecords(&subs)),
-            b"SCPT" => Record::Scpt(Scpt::from_subrecords(&subs)),
-            b"REGN" => Record::Regn(Regn::from_subrecords(&subs)),
-            b"BSGN" => Record::Bsgn(Bsgn::from_subrecords(&subs)),
-            b"LTEX" => Record::Ltex(Ltex::from_subrecords(&subs)),
-            b"STAT" => Record::Stat(Stat::from_subrecords(&subs)),
-            b"DOOR" => Record::Door(Door::from_subrecords(&subs)),
-            b"MISC" => Record::Misc(Misc::from_subrecords(&subs)),
-            b"WEAP" => Record::Weap(Weap::from_subrecords(&subs)),
-            b"CONT" => Record::Cont(Cont::from_subrecords(&subs)),
-            b"SPEL" => Record::Spel(Spel::from_subrecords(&subs)),
-            b"CREA" => Record::Crea(Crea::from_subrecords(&subs)),
-            b"BODY" => Record::Body(Body::from_subrecords(&subs)),
-            b"LIGH" => Record::Ligh(Ligh::from_subrecords(&subs)),
-            b"ENCH" => Record::Ench(Ench::from_subrecords(&subs)),
-            b"NPC_" => Record::Npc(Npc::from_subrecords(&subs)),
-            b"ARMO" => Record::Armo(Armo::from_subrecords(&subs)),
-            b"CLOT" => Record::Clot(Clot::from_subrecords(&subs)),
-            b"REPA" => Record::Repa(Repa::from_subrecords(&subs)),
-            b"ACTI" => Record::Acti(Acti::from_subrecords(&subs)),
-            b"APPA" => Record::Appa(Appa::from_subrecords(&subs)),
-            b"LOCK" => Record::Lock(Lock::from_subrecords(&subs)),
-            b"PROB" => Record::Prob(Prob::from_subrecords(&subs)),
-            b"INGR" => Record::Ingr(Ingr::from_subrecords(&subs)),
-            b"BOOK" => Record::Book(Book::from_subrecords(&subs)),
-            b"ALCH" => Record::Alch(Alch::from_subrecords(&subs)),
-            b"LEVI" => Record::Levi(Levi::from_subrecords(&subs)),
-            b"LEVC" => Record::Levc(Levc::from_subrecords(&subs)),
-            b"CELL" => Record::Cell(Cell::from_subrecords(&subs)),
-            b"LAND" => Record::Land(Land::from_subrecords(&subs)),
-            b"PGRD" => Record::Pgrd(Pgrd::from_subrecords(&subs)),
-            b"SNDG" => Record::Sndg(Sndg::from_subrecords(&subs)),
-            b"DIAL" => Record::Dial(Dial::from_subrecords(&subs)),
-            b"INFO" => Record::Info(Info::from_subrecords(&subs)),
+            b"TES3" => Record::Tes3(Tes3::from_subrecords(subs)),
+            b"GMST" => Record::Gmst(Gmst::from_subrecords(subs)),
+            b"GLOB" => Record::Glob(Glob::from_subrecords(subs)),
+            b"CLAS" => Record::Clas(Clas::from_subrecords(subs)),
+            b"FACT" => Record::Fact(Fact::from_subrecords(subs)),
+            b"RACE" => Record::Race(Race::from_subrecords(subs)),
+            b"SOUN" => Record::Soun(Soun::from_subrecords(subs)),
+            b"SKIL" => Record::Skil(Skil::from_subrecords(subs)),
+            b"MGEF" => Record::Mgef(Mgef::from_subrecords(subs)),
+            b"SCPT" => Record::Scpt(Scpt::from_subrecords(subs)),
+            b"REGN" => Record::Regn(Regn::from_subrecords(subs)),
+            b"BSGN" => Record::Bsgn(Bsgn::from_subrecords(subs)),
+            b"LTEX" => Record::Ltex(Ltex::from_subrecords(subs)),
+            b"STAT" => Record::Stat(Stat::from_subrecords(subs)),
+            b"DOOR" => Record::Door(Door::from_subrecords(subs)),
+            b"MISC" => Record::Misc(Misc::from_subrecords(subs)),
+            b"WEAP" => Record::Weap(Weap::from_subrecords(subs)),
+            b"CONT" => Record::Cont(Cont::from_subrecords(subs)),
+            b"SPEL" => Record::Spel(Spel::from_subrecords(subs)),
+            b"CREA" => Record::Crea(Crea::from_subrecords(subs)),
+            b"BODY" => Record::Body(Body::from_subrecords(subs)),
+            b"LIGH" => Record::Ligh(Ligh::from_subrecords(subs)),
+            b"ENCH" => Record::Ench(Ench::from_subrecords(subs)),
+            b"NPC_" => Record::Npc(Npc::from_subrecords(subs)),
+            b"ARMO" => Record::Armo(Armo::from_subrecords(subs)),
+            b"CLOT" => Record::Clot(Clot::from_subrecords(subs)),
+            b"REPA" => Record::Repa(Repa::from_subrecords(subs)),
+            b"ACTI" => Record::Acti(Acti::from_subrecords(subs)),
+            b"APPA" => Record::Appa(Appa::from_subrecords(subs)),
+            b"LOCK" => Record::Lock(Lock::from_subrecords(subs)),
+            b"PROB" => Record::Prob(Prob::from_subrecords(subs)),
+            b"INGR" => Record::Ingr(Ingr::from_subrecords(subs)),
+            b"BOOK" => Record::Book(Book::from_subrecords(subs)),
+            b"ALCH" => Record::Alch(Alch::from_subrecords(subs)),
+            b"LEVI" => Record::Levi(Levi::from_subrecords(subs)),
+            b"LEVC" => Record::Levc(Levc::from_subrecords(subs)),
+            b"CELL" => Record::Cell(Cell::from_subrecords(subs)),
+            b"LAND" => Record::Land(Land::from_subrecords(subs)),
+            b"PGRD" => Record::Pgrd(Pgrd::from_subrecords(subs)),
+            b"SNDG" => Record::Sndg(Sndg::from_subrecords(subs)),
+            b"DIAL" => Record::Dial(Dial::from_subrecords(subs)),
+            b"INFO" => Record::Info(Info::from_subrecords(subs)),
             _ => Record::Unknown { tag, flags, data },
         }
     }

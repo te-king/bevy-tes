@@ -40,7 +40,7 @@ pub struct Appa<'a> {
 }
 
 impl<'a> Appa<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Appa<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Appa<'a> {
         let mut out = Appa::default();
         for sub in subs {
             match &sub.tag {

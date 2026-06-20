@@ -12,7 +12,7 @@ pub struct Acti<'a> {
 }
 
 impl<'a> Acti<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Acti<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Acti<'a> {
         let mut out = Acti::default();
         for sub in subs {
             match &sub.tag {

@@ -40,7 +40,7 @@ pub struct Alch<'a> {
 }
 
 impl<'a> Alch<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Alch<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Alch<'a> {
         let mut out = Alch::default();
         for sub in subs {
             match &sub.tag {

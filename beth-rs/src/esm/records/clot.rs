@@ -43,7 +43,7 @@ pub struct Clot<'a> {
 }
 
 impl<'a> Clot<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Clot<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Clot<'a> {
         let mut out = Clot::default();
         for sub in subs {
             match &sub.tag {

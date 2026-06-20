@@ -75,7 +75,7 @@ pub struct Info<'a> {
 }
 
 impl<'a> Info<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Info<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Info<'a> {
         let mut out = Info::default();
         for sub in subs {
             match &sub.tag {

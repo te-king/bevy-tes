@@ -49,7 +49,7 @@ fn vhgt(input: &[u8]) -> IResult<&[u8], (f32, &[u8])> {
 }
 
 impl<'a> Land<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Land<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Land<'a> {
         let mut out = Land::default();
         for sub in subs {
             match &sub.tag {

@@ -39,7 +39,7 @@ pub struct Prob<'a> {
 }
 
 impl<'a> Prob<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Prob<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Prob<'a> {
         let mut out = Prob::default();
         for sub in subs {
             match &sub.tag {

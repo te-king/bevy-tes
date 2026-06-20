@@ -40,7 +40,7 @@ fn hedr(input: &[u8]) -> IResult<&[u8], HedrFields<'_>> {
 }
 
 impl<'a> Tes3<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Tes3<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Tes3<'a> {
         let mut out = Tes3::default();
         let mut pending_master: Option<&'a L1Str> = None;
         for sub in subs {

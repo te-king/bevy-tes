@@ -12,7 +12,7 @@ pub struct Dial<'a> {
 }
 
 impl<'a> Dial<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Dial<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Dial<'a> {
         let mut out = Dial::default();
         for sub in subs {
             match &sub.tag {

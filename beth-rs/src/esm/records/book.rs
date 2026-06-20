@@ -46,7 +46,7 @@ pub struct Book<'a> {
 }
 
 impl<'a> Book<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Book<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Book<'a> {
         let mut out = Book::default();
         for sub in subs {
             match &sub.tag {

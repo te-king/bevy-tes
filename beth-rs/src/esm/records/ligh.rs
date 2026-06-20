@@ -47,7 +47,7 @@ pub struct Ligh<'a> {
 }
 
 impl<'a> Ligh<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Ligh<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ligh<'a> {
         let mut out = Ligh::default();
         for sub in subs {
             match &sub.tag {

@@ -34,7 +34,7 @@ pub struct Soun<'a> {
 }
 
 impl<'a> Soun<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Soun<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Soun<'a> {
         let mut out = Soun::default();
         for sub in subs {
             match &sub.tag {

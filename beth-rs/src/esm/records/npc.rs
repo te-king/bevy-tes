@@ -130,7 +130,7 @@ pub struct Npc<'a> {
 }
 
 impl<'a> Npc<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Npc<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Npc<'a> {
         let mut out = Npc::default();
         for sub in subs {
             match &sub.tag {

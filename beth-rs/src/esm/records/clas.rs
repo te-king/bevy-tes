@@ -53,7 +53,7 @@ pub struct Clas<'a> {
 }
 
 impl<'a> Clas<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Clas<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Clas<'a> {
         let mut out = Clas::default();
         for sub in subs {
             match &sub.tag {

@@ -71,7 +71,7 @@ pub struct Regn<'a> {
 }
 
 impl<'a> Regn<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Regn<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Regn<'a> {
         let mut out = Regn::default();
         for sub in subs {
             match &sub.tag {

@@ -69,7 +69,7 @@ pub struct Race<'a> {
 }
 
 impl<'a> Race<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Race<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Race<'a> {
         let mut out = Race::default();
         for sub in subs {
             match &sub.tag {

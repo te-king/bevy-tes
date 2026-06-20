@@ -50,7 +50,7 @@ pub struct Armo<'a> {
 }
 
 impl<'a> Armo<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Armo<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Armo<'a> {
         let mut out = Armo::default();
         for sub in subs {
             match &sub.tag {

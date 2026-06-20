@@ -119,15 +119,40 @@ pub fn subrecord(input: &[u8]) -> IResult<&[u8], Subrecord<'_>> {
     Ok((input, Subrecord { tag, data }))
 }
 
-/// Parse all subrecords contained in a record's data block.
-pub fn subrecords(mut input: &[u8]) -> IResult<&[u8], Vec<Subrecord<'_>>> {
-    let mut out = Vec::new();
-    while !input.is_empty() {
-        let (rest, sub) = subrecord(input)?;
-        out.push(sub);
-        input = rest;
+/// A non-allocating iterator over the subrecords in a record's data block.
+///
+/// Subrecords are parsed on demand straight from the borrowed buffer. A malformed or
+/// truncated subrecord simply ends iteration (the record keeps whatever fields parsed
+/// before it) rather than erroring — valid files always consume the block exactly.
+#[derive(Debug, Clone)]
+pub struct Subrecords<'a> {
+    input: &'a [u8],
+}
+
+impl<'a> Subrecords<'a> {
+    pub fn new(input: &'a [u8]) -> Subrecords<'a> {
+        Subrecords { input }
     }
-    Ok((input, out))
+}
+
+impl<'a> Iterator for Subrecords<'a> {
+    type Item = Subrecord<'a>;
+
+    fn next(&mut self) -> Option<Subrecord<'a>> {
+        if self.input.is_empty() {
+            return None;
+        }
+        match subrecord(self.input) {
+            Ok((rest, sub)) => {
+                self.input = rest;
+                Some(sub)
+            }
+            Err(_) => {
+                self.input = &[];
+                None
+            }
+        }
+    }
 }
 
 /// An RGB(A) color. The format's `rgb` type occupies 4 bytes (the 4th is padding/alpha).
@@ -209,8 +234,7 @@ mod tests {
     fn parses_subrecords() {
         // NAME "abc\0" then FNAM "hi\0".
         let bytes = b"NAME\x04\x00\x00\x00abc\x00FNAM\x03\x00\x00\x00hi\x00";
-        let (rest, subs) = subrecords(bytes).unwrap();
-        assert!(rest.is_empty());
+        let subs: Vec<_> = Subrecords::new(bytes).collect();
         assert_eq!(subs.len(), 2);
         assert_eq!(&subs[0].tag, b"NAME");
         assert_eq!(l1(subs[0].data), "abc");

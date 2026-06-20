@@ -21,7 +21,7 @@ pub struct Levi<'a> {
 }
 
 impl<'a> Levi<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Levi<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Levi<'a> {
         let mut out = Levi::default();
         for sub in subs {
             match &sub.tag {

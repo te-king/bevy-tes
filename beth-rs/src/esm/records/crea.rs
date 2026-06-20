@@ -92,7 +92,7 @@ pub struct Crea<'a> {
 }
 
 impl<'a> Crea<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Crea<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Crea<'a> {
         let mut out = Crea::default();
         for sub in subs {
             match &sub.tag {

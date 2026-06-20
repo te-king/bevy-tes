@@ -20,7 +20,7 @@ pub struct Levc<'a> {
 }
 
 impl<'a> Levc<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Levc<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Levc<'a> {
         let mut out = Levc::default();
         for sub in subs {
             match &sub.tag {

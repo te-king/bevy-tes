@@ -30,7 +30,7 @@ pub struct Spel<'a> {
 }
 
 impl<'a> Spel<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Spel<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Spel<'a> {
         let mut out = Spel::default();
         for sub in subs {
             match &sub.tag {

@@ -13,7 +13,7 @@ pub struct Glob<'a> {
 }
 
 impl<'a> Glob<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Glob<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Glob<'a> {
         let mut out = Glob::default();
         for sub in subs {
             match &sub.tag {

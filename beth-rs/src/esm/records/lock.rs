@@ -39,7 +39,7 @@ pub struct Lock<'a> {
 }
 
 impl<'a> Lock<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Lock<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Lock<'a> {
         let mut out = Lock::default();
         for sub in subs {
             match &sub.tag {

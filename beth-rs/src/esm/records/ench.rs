@@ -39,7 +39,7 @@ pub struct Ench<'a> {
 }
 
 impl<'a> Ench<'a> {
-    pub fn from_subrecords(subs: &[Subrecord<'a>]) -> Ench<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ench<'a> {
         let mut out = Ench::default();
         for sub in subs {
             match &sub.tag {
