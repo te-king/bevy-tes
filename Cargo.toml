@@ -1,0 +1,10 @@
+[workspace]
+members = ["beth-rs"]
+resolver = "3"
+
+[package]
+name = "bevy-beth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
