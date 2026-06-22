@@ -2,7 +2,8 @@
 .DS_Store
 
 # Bethesda game data — large, copyrighted, supplied locally (not redistributable).
-# Tests expect beth-rs/tests/Morrowind.esm to be present on the machine running them.
+# Tests expect e.g. crates/beth-esm/tests/Morrowind.esm to be present when running them.
 *.esm
 *.esp
 *.bsa
+*.nif

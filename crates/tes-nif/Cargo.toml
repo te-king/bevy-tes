@@ -1,0 +1,12 @@
+[package]
+name = "tes-nif"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tes-core = { workspace = true }
+nom = { workspace = true }
+
+[dev-dependencies]
+# Tests pull a real .nif out of a BSA archive to exercise the parser.
+tes3-bsa = { workspace = true }

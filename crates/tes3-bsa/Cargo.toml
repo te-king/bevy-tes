@@ -1,0 +1,13 @@
+[package]
+name = "tes3-bsa"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tes-core = { workspace = true }
+nom = { workspace = true }
+
+[dev-dependencies]
+# The `cli` example also inspects plugins, so it needs the ESM parser.
+tes3-esm = { workspace = true }
+clap = { workspace = true }

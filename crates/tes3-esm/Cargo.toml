@@ -1,0 +1,8 @@
+[package]
+name = "tes3-esm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tes-core = { workspace = true }
+nom = { workspace = true }

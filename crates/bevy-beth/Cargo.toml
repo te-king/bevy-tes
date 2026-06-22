@@ -1,0 +1,13 @@
+[package]
+name = "bevy-beth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tes3-esm = { workspace = true }
+tes3-bsa = { workspace = true }
+tes-nif = { workspace = true }
+bevy = { workspace = true }
+
+[dev-dependencies]
+clap = { workspace = true }

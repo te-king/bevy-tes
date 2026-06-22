@@ -1,17 +1,17 @@
 [workspace]
-members = ["beth-rs"]
+members = ["crates/*"]
 resolver = "3"
 
-[package]
-name = "bevy-beth"
-version = "0.1.0"
-edition = "2024"
+[workspace.dependencies]
+# Internal crates (path deps shared across the workspace).
+tes-core = { path = "crates/tes-core" }
+tes3-esm = { path = "crates/tes3-esm" }
+tes3-bsa = { path = "crates/tes3-bsa" }
+tes-nif = { path = "crates/tes-nif" }
 
-[dependencies]
-beth-rs = { path = "beth-rs" }
+# Third-party.
+nom = "8"
 bevy = { version = "0.19", default-features = false, features = ["bevy_asset"] }
-
-[dev-dependencies]
 clap = { version = "4", features = ["derive"] }
 
 [profile.release]

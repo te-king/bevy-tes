@@ -1,0 +1,84 @@
+//! `ARMO` — armor.
+
+use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
+use crate::shared::BipedItem;
+use nom::IResult;
+use tes_core::L1String;
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ArmorData {
+    /// Armor type (0 = Helmet … 10 = Right Bracer).
+    pub kind: u32,
+    pub weight: f32,
+    pub value: u32,
+    pub health: u32,
+    pub enchant_points: u32,
+    pub armor_rating: u32,
+}
+
+fn armor_data(input: &[u8]) -> IResult<&[u8], ArmorData> {
+    let (input, kind) = le_u32(input)?;
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, health) = le_u32(input)?;
+    let (input, enchant_points) = le_u32(input)?;
+    let (input, armor_rating) = le_u32(input)?;
+    Ok((
+        input,
+        ArmorData {
+            kind,
+            weight,
+            value,
+            health,
+            enchant_points,
+            armor_rating,
+        },
+    ))
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Armo {
+    pub id: L1String,
+    pub model: L1String,
+    pub name: L1String,
+    pub script: Option<L1String>,
+    pub data: ArmorData,
+    pub icon: Option<L1String>,
+    /// Biped slots (`INDX` with optional `BNAM`/`CNAM` model overrides).
+    pub biped: Vec<BipedItem>,
+    pub enchantment: Option<L1String>,
+}
+
+impl Armo {
+    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Armo {
+        let mut out = Armo::default();
+        for sub in subs {
+            match &sub.tag {
+                b"NAME" => out.id = l1(sub.data),
+                b"MODL" => out.model = l1(sub.data),
+                b"FNAM" => out.name = l1(sub.data),
+                b"SCRI" => out.script = Some(l1(sub.data)),
+                b"AODT" => out.data = parse_or_default(armor_data, sub.data),
+                b"ITEX" => out.icon = Some(l1(sub.data)),
+                b"INDX" => out.biped.push(BipedItem {
+                    index: sub.data.first().copied().unwrap_or(0),
+                    male_model: None,
+                    female_model: None,
+                }),
+                b"BNAM" => {
+                    if let Some(last) = out.biped.last_mut() {
+                        last.male_model = Some(l1(sub.data));
+                    }
+                }
+                b"CNAM" => {
+                    if let Some(last) = out.biped.last_mut() {
+                        last.female_model = Some(l1(sub.data));
+                    }
+                }
+                b"ENAM" => out.enchantment = Some(l1(sub.data)),
+                _ => {}
+            }
+        }
+        out
+    }
+}
