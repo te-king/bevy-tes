@@ -20,14 +20,13 @@ fn first_nif() -> Option<Vec<u8>> {
         eprintln!("skipping: {BSA_PATH} not present");
         return None;
     }
-    let bytes = std::fs::read(BSA_PATH).expect("read bsa");
-    let bsa = Bsa::parse(&bytes).expect("parse bsa");
+    let bsa = Bsa::open(BSA_PATH).expect("open bsa");
     let entry = bsa
         .files
         .iter()
         .find(|f| f.name.decode().to_ascii_lowercase().ends_with(".nif"))
         .expect("archive contains at least one .nif");
-    Some(entry.data.clone())
+    Some(bsa.bytes(entry).to_vec())
 }
 
 #[test]

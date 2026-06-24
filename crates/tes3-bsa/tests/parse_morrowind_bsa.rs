@@ -4,14 +4,9 @@ use tes3_bsa::Bsa;
 
 const MORROWIND_BSA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Morrowind.bsa");
 
-fn load() -> Vec<u8> {
-    std::fs::read(MORROWIND_BSA).expect("Morrowind.bsa should be readable")
-}
-
 #[test]
 fn parses_archive() {
-    let bytes = load();
-    let bsa = Bsa::parse(&bytes).unwrap();
+    let bsa = Bsa::open(MORROWIND_BSA).unwrap();
     assert_eq!(bsa.version, 0x100);
     assert_eq!(bsa.files.len(), 11_090);
 
@@ -19,7 +14,7 @@ fn parses_archive() {
     let probe = bsa
         .get(r"meshes\m\probe_journeyman_01.nif")
         .expect("known mesh should be present");
-    assert_eq!(probe.data.len(), 6276);
+    assert_eq!(probe.len(), 6276);
 
     // Lookup is case-insensitive and separator-tolerant.
     assert!(bsa.get("MESHES/M/PROBE_JOURNEYMAN_01.NIF").is_some());
@@ -27,21 +22,17 @@ fn parses_archive() {
 
 #[test]
 fn every_entry_has_a_name_and_data() {
-    let bytes = load();
-    let bsa = Bsa::parse(&bytes).unwrap();
-    // Entries own their bytes now, so there is no source buffer to bounds-check against;
-    // instead confirm the directory decoded into named entries holding actual data.
+    let bsa = Bsa::open(MORROWIND_BSA).unwrap();
     for f in &bsa.files {
         assert!(!f.name.is_empty(), "every entry should have a name");
     }
-    let total: usize = bsa.files.iter().map(|f| f.data.len()).sum();
+    let total: usize = bsa.files.iter().map(|f| bsa.bytes(f).len()).sum();
     assert!(total > 0, "archive should contain file data");
 }
 
 #[test]
 fn dds_textures_have_the_dds_magic() {
-    let bytes = load();
-    let bsa = Bsa::parse(&bytes).unwrap();
+    let bsa = Bsa::open(MORROWIND_BSA).unwrap();
     // Spot-check that a .dds entry's bytes really are a DDS file ("DDS " magic),
     // proving the size/offset resolution lands on the right data.
     let dds = bsa
@@ -49,7 +40,7 @@ fn dds_textures_have_the_dds_magic() {
         .iter()
         .find(|f| f.name.decode().to_ascii_lowercase().ends_with(".dds"))
         .expect("archive contains textures");
-    assert_eq!(&dds.data[..4], b"DDS ");
+    assert_eq!(&bsa.bytes(dds)[..4], b"DDS ");
 }
 
 /// Fold bytes into a checksum fast enough to stay memory-bandwidth bound, so the read
@@ -67,18 +58,17 @@ fn fold(mut acc: u64, data: &[u8]) -> u64 {
 
 /// Time opening the archive and reading every file's bytes — the BSA analogue of the
 /// ESM parse-timing test. Run with `--show-output` to see the measurement, e.g.:
-/// `cargo test -p beth-rs --release parse_timing -- --show-output`
+/// `cargo test -p tes3-bsa --release parse_timing -- --show-output`
 #[test]
 fn parse_timing() {
     use std::hint::black_box;
     use std::time::{Duration, Instant};
 
-    let bytes = load();
-    let total_data: usize = Bsa::parse(&bytes)
+    let total_data: usize = Bsa::open(MORROWIND_BSA)
         .unwrap()
         .files
         .iter()
-        .map(|f| f.data.len())
+        .map(|f| f.size as usize)
         .sum();
     const ITERATIONS: u32 = 20;
 
@@ -88,10 +78,10 @@ fn parse_timing() {
     let mut file_count = 0;
     for _ in 0..ITERATIONS {
         let start = Instant::now();
-        let bsa = Bsa::parse(&bytes).expect("parse should succeed");
+        let bsa = Bsa::open(MORROWIND_BSA).expect("open should succeed");
         let mut acc = 0u64;
         for f in &bsa.files {
-            acc = fold(acc, &f.data);
+            acc = fold(acc, bsa.bytes(f));
         }
         let elapsed = start.elapsed();
         checksum ^= acc;

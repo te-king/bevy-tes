@@ -14,15 +14,21 @@
 //! }
 //!
 //! App::new()
-//!     .add_plugins((AssetPlugin::default(), BethPlugin))
+//!     .add_plugins((AssetPlugin::default(), BethPlugin::default()))
 //!     .add_systems(Startup, load);
 //! ```
+//!
+//! The `asset_root` on [`BethPlugin`] must match the `file_path` on [`AssetPlugin`] so
+//! that [`BsaAsset`] loading can mmap the archive directly from disk. Both default to
+//! `"assets"`.
 //!
 //! Decoding meshes, textures and other content *out of* the loaded data (NIF → Bevy
 //! meshes/materials, textures → images, …) is future work; the [`convert`] module is its
 //! placeholder. For now this layer only exposes the parsed structures as Bevy assets.
 //!
 //! [`AssetServer`]: bevy::asset::AssetServer
+
+use std::path::PathBuf;
 
 use bevy::app::{App, Plugin};
 use bevy::asset::io::Reader;
@@ -37,7 +43,7 @@ pub mod convert;
 
 pub use tes_nif;
 /// Re-exports of the underlying parser crates, so downstream code can name the parsed
-/// types ([`tes3_esm::Record`], [`tes3_bsa::FileEntry`], [`tes_nif::Nif`], …) without
+/// types ([`tes3_esm::Record`], [`tes3_bsa::FileRecord`], [`tes_nif::Nif`], …) without
 /// taking a separate dependency.
 pub use tes3_bsa;
 pub use tes3_esm;
@@ -50,7 +56,8 @@ pub struct EsmAsset(pub TesPlugin);
 
 /// A parsed TES3 BSA archive wrapped as a Bevy [`Asset`].
 ///
-/// Wraps an owned [`tes3_bsa::Bsa`]; access the file entries via the `0` field.
+/// Wraps an owned [`tes3_bsa::Bsa`]; access the file directory via the `0` field and read
+/// file bytes via [`Bsa::get`] or [`Bsa::bytes`].
 #[derive(Asset, TypePath, Debug)]
 pub struct BsaAsset(pub Bsa);
 
@@ -86,9 +93,14 @@ impl AssetLoader for EsmLoader {
     }
 }
 
-/// Loads `.bsa` archives into [`BsaAsset`].
-#[derive(Default, TypePath)]
-struct BsaLoader;
+/// Loads `.bsa` archives into [`BsaAsset`] by mmapping the archive file directly.
+///
+/// The `asset_root` must match the `file_path` configured on Bevy's [`AssetPlugin`] so
+/// the loader can resolve the archive's OS path.
+#[derive(TypePath)]
+struct BsaLoader {
+    asset_root: PathBuf,
+}
 
 impl AssetLoader for BsaLoader {
     type Asset = BsaAsset;
@@ -97,13 +109,12 @@ impl AssetLoader for BsaLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        _reader: &mut dyn Reader,
         _settings: &(),
-        _load_context: &mut LoadContext<'_>,
+        load_context: &mut LoadContext<'_>,
     ) -> Result<BsaAsset, BsaError> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await.map_err(BsaError::Io)?;
-        Ok(BsaAsset(Bsa::parse(&bytes)?))
+        let path = self.asset_root.join(load_context.path().path());
+        Ok(BsaAsset(Bsa::open(path)?))
     }
 
     fn extensions(&self) -> &[&str] {
@@ -138,9 +149,23 @@ impl AssetLoader for NifLoader {
 
 /// Bevy plugin that registers the TES3 asset types and their loaders.
 ///
+/// The `asset_root` field must match the `file_path` on Bevy's
+/// [`AssetPlugin`](bevy::asset::AssetPlugin) — both default to `"assets"`. Set them to
+/// the same value when using a non-default asset directory.
+///
 /// Requires Bevy's [`AssetPlugin`](bevy::asset::AssetPlugin) to be present (it is part of
 /// `DefaultPlugins`); add it explicitly in headless apps.
-pub struct BethPlugin;
+pub struct BethPlugin {
+    /// The filesystem root from which `.bsa` archives are resolved.
+    /// Must match [`AssetPlugin::file_path`](bevy::asset::AssetPlugin::file_path).
+    pub asset_root: PathBuf,
+}
+
+impl Default for BethPlugin {
+    fn default() -> Self {
+        Self { asset_root: PathBuf::from("assets") }
+    }
+}
 
 impl Plugin for BethPlugin {
     fn build(&self, app: &mut App) {
@@ -148,7 +173,7 @@ impl Plugin for BethPlugin {
             .init_asset::<BsaAsset>()
             .init_asset::<NifAsset>()
             .init_asset_loader::<EsmLoader>()
-            .init_asset_loader::<BsaLoader>()
+            .register_asset_loader(BsaLoader { asset_root: self.asset_root.clone() })
             .init_asset_loader::<NifLoader>();
     }
 }

@@ -33,7 +33,7 @@ fn app_with_assets() -> App {
             file_path: ASSET_ROOT.to_string(),
             ..Default::default()
         },
-        BethPlugin,
+        BethPlugin::default(),
     ));
     app
 }

@@ -78,7 +78,7 @@ fn main() -> ExitCode {
             file_path: root,
             ..Default::default()
         },
-        BethPlugin,
+        BethPlugin::default(),
     ));
 
     let handle: Handle<EsmAsset> = app

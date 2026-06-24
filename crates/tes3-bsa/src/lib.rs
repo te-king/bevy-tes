@@ -1,15 +1,14 @@
 //! TES3 (Morrowind) BSA archive parsing.
 //!
 //! A BSA is a flat archive: a small directory (file sizes, offsets, names and lookup
-//! hashes) followed by the concatenated file data. Parsing copies each file out: every
-//! [`FileEntry`] owns its bytes, so the parsed [`Bsa`] is `'static` and the archive
-//! buffer is only borrowed for the duration of the parse call:
+//! hashes) followed by the concatenated file data. Opening an archive mmaps the file and
+//! builds an in-memory directory of [`FileRecord`]s; individual file bytes are served as
+//! zero-copy slices into the mapping:
 //!
 //! ```no_run
-//! let bytes = std::fs::read("crates/tes3-bsa/tests/Morrowind.bsa").unwrap();
-//! let bsa = tes3_bsa::Bsa::parse(&bytes).unwrap();
-//! if let Some(file) = bsa.get(r"meshes\m\probe_journeyman_01.nif") {
-//!     println!("{} bytes", file.data.len());
+//! let bsa = tes3_bsa::Bsa::open("crates/tes3-bsa/tests/Morrowind.bsa").unwrap();
+//! if let Some(bytes) = bsa.get(r"meshes\m\probe_journeyman_01.nif") {
+//!     println!("{} bytes", bytes.len());
 //! }
 //! ```
 
@@ -17,6 +16,7 @@ use nom::IResult;
 use nom::bytes::complete::take;
 use nom::number::complete::le_u32;
 use std::fmt;
+use std::path::Path;
 use tes_core::L1String;
 
 /// The only BSA layout version Morrowind/Tribunal/Bloodmoon use.
@@ -48,25 +48,32 @@ impl From<std::io::Error> for BsaError {
     }
 }
 
-/// A single archived file: its name, its (owned) bytes and the 64-bit lookup hash stored
-/// in the directory.
+/// Directory entry for a single archived file: its name, lookup hash, and location within
+/// the data section of the archive.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FileEntry {
+pub struct FileRecord {
     /// Path within the archive, e.g. `meshes\m\probe_journeyman_01.nif` (Windows-1252,
     /// backslash-separated).
     pub name: L1String,
-    /// The file's raw contents.
-    pub data: Vec<u8>,
     /// The directory's precomputed lookup hash for `name`.
     pub hash: u64,
+    /// Byte offset of this file's data within the archive's data section.
+    pub offset: u32,
+    /// Byte length of this file's data.
+    pub size: u32,
 }
 
-/// A parsed TES3 BSA archive. Owns its entries' names and bytes, so it is `'static` and
-/// outlives the buffer it was parsed from.
-#[derive(Debug, Clone, PartialEq, Default)]
+/// An open TES3 BSA archive. Holds an mmap of the archive file and an in-memory directory
+/// of [`FileRecord`]s; file bytes are served as zero-copy slices into the mapping.
+///
+/// Dropping the `Bsa` releases the mmap (the OS unmaps the pages).
+#[derive(Debug)]
 pub struct Bsa {
     pub version: u32,
-    pub files: Vec<FileEntry>,
+    pub files: Vec<FileRecord>,
+    mmap: memmap2::Mmap,
+    /// Absolute byte offset within `mmap` at which the file data section begins.
+    data_start: usize,
 }
 
 /// Read a little-endian `u32` from a fixed position in an exact-length block.
@@ -75,71 +82,92 @@ fn u32_at(block: &[u8], byte: usize) -> u32 {
 }
 
 impl Bsa {
-    /// Parse an archive from an in-memory byte slice. The returned [`Bsa`] owns its data
-    /// (copied out of `input`), so it does not borrow `input` after this returns.
-    pub fn parse(input: &[u8]) -> Result<Bsa, BsaError> {
-        let parse = |input| -> IResult<&[u8], Bsa> {
+    /// Open a BSA archive at `path`, mapping it into memory and building the file directory.
+    /// File data is not copied; bytes are served on demand as zero-copy slices via
+    /// [`bytes`](Self::bytes) and [`get`](Self::get).
+    pub fn open(path: impl AsRef<Path>) -> Result<Bsa, BsaError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: We open the file read-only and never write through the mapping.
+        // Concurrent modification of game data files by another process is not expected.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::parse_directory(mmap)
+    }
+
+    fn parse_directory(mmap: memmap2::Mmap) -> Result<Bsa, BsaError> {
+        let parse = |input| -> IResult<&[u8], (u32, usize, Vec<FileRecord>)> {
             let (input, version) = le_u32(input)?;
             let (input, hash_offset) = le_u32(input)?;
             let (input, count) = le_u32(input)?;
             let count = count as usize;
+            let hash_offset = hash_offset as usize;
 
             // After the 12-byte header come three parallel tables, then a name blob,
             // then the hash table; `hash_offset` spans everything between the header and
             // the hash table.
             let (input, size_offsets) = take(count * 8)(input)?; // (u32 size, u32 offset)
             let (input, name_offsets) = take(count * 4)(input)?; // u32 into name blob
-            let names_len = (hash_offset as usize)
+            let names_len = hash_offset
                 .checked_sub(count * 12)
                 .ok_or_else(|| nom_fail(input))?;
             let (input, names) = take(names_len)(input)?;
-            let (data, hashes) = take(count * 8)(input)?; // two u32 halves per file
+            let (_, hashes) = take(count * 8)(input)?; // two u32 halves per file
+
+            // data_start = 12 (header) + hash_offset (dir tables) + count * 8 (hash table)
+            let data_start = 12 + hash_offset + count * 8;
 
             let mut files = Vec::with_capacity(count);
             for i in 0..count {
-                let size = u32_at(size_offsets, i * 8) as usize;
-                let offset = u32_at(size_offsets, i * 8 + 4) as usize;
+                let size = u32_at(size_offsets, i * 8);
+                let offset = u32_at(size_offsets, i * 8 + 4);
                 let name_off = u32_at(name_offsets, i * 4) as usize;
 
-                let name_bytes = names.get(name_off..).ok_or_else(|| nom_fail(data))?;
+                let name_bytes = names.get(name_off..).ok_or_else(|| nom_fail(hashes))?;
                 let end = name_bytes
                     .iter()
                     .position(|&b| b == 0)
                     .unwrap_or(name_bytes.len());
                 let name = L1String::from_bytes(name_bytes[..end].to_vec());
 
-                let file_data = data
-                    .get(offset..offset + size)
-                    .ok_or_else(|| nom_fail(data))?;
                 let hash = u64::from_le_bytes(hashes[i * 8..i * 8 + 8].try_into().unwrap());
 
-                files.push(FileEntry {
+                files.push(FileRecord {
                     name,
-                    data: file_data.to_vec(),
                     hash,
+                    offset,
+                    size,
                 });
             }
 
-            Ok((data, Bsa { version, files }))
+            Ok((&[], (version, data_start, files)))
         };
 
-        let (_, bsa) = parse(input).map_err(|e| BsaError::Parse(format!("{e:?}")))?;
-        if bsa.version != VERSION_TES3 {
+        let input: &[u8] = &mmap;
+        let (_, (version, data_start, files)) =
+            parse(input).map_err(|e| BsaError::Parse(format!("{e:?}")))?;
+
+        if version != VERSION_TES3 {
             return Err(BsaError::Parse(format!(
                 "unsupported BSA version {:#x} (expected {:#x})",
-                bsa.version, VERSION_TES3
+                version, VERSION_TES3
             )));
         }
-        Ok(bsa)
+
+        Ok(Bsa { version, files, mmap, data_start })
+    }
+
+    /// Return the raw bytes for `record` as a zero-copy slice into the archive mapping.
+    pub fn bytes(&self, record: &FileRecord) -> &[u8] {
+        let start = self.data_start + record.offset as usize;
+        &self.mmap[start..start + record.size as usize]
     }
 
     /// Look up a file by path, case-insensitively and tolerant of `/` vs `\` separators.
+    /// Returns a zero-copy slice into the archive mapping on success.
     /// Linear scan; build your own index if you need many lookups.
-    pub fn get(&self, name: &str) -> Option<&FileEntry> {
+    pub fn get(&self, name: &str) -> Option<&[u8]> {
         let key = normalize(name);
-        self.files
-            .iter()
-            .find(|f| normalize(&f.name.decode()) == key)
+        let record = self.files.iter().find(|f| normalize(&f.name.decode()) == key)?;
+        Some(self.bytes(record))
     }
 }
 

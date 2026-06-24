@@ -4,33 +4,27 @@ use tes3_bsa::Bsa;
 
 const BLOODMOON_BSA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Bloodmoon.bsa");
 
-fn load() -> Vec<u8> {
-    std::fs::read(BLOODMOON_BSA).expect("Bloodmoon.bsa should be readable")
-}
-
 #[test]
 fn parses_archive() {
-    let bytes = load();
-    let bsa = Bsa::parse(&bytes).unwrap();
+    let bsa = Bsa::open(BLOODMOON_BSA).unwrap();
     assert_eq!(bsa.version, 0x100);
     assert_eq!(bsa.files.len(), 1_545);
 
     let tex = bsa
         .get(r"textures\c_nordic02_upperarm.dds")
         .expect("known texture should be present");
-    assert_eq!(tex.data.len(), 43_856);
+    assert_eq!(tex.len(), 43_856);
 }
 
 #[test]
 fn dds_textures_have_the_dds_magic() {
-    let bytes = load();
-    let bsa = Bsa::parse(&bytes).unwrap();
+    let bsa = Bsa::open(BLOODMOON_BSA).unwrap();
     let dds = bsa
         .files
         .iter()
         .find(|f| f.name.decode().to_ascii_lowercase().ends_with(".dds"))
         .expect("archive contains textures");
-    assert_eq!(&dds.data[..4], b"DDS ");
+    assert_eq!(&bsa.bytes(dds)[..4], b"DDS ");
 }
 
 /// Fold bytes into a checksum fast enough to stay memory-bandwidth bound, so the read
@@ -46,20 +40,18 @@ fn fold(mut acc: u64, data: &[u8]) -> u64 {
     acc
 }
 
-/// Time opening the archive and reading every file's bytes — the BSA analogue of the
-/// ESM parse-timing test. Run with `--show-output` to see the measurement, e.g.:
-/// `cargo test -p beth-rs --release parse_timing -- --show-output`
+/// Time opening the archive and reading every file's bytes.
+/// `cargo test -p tes3-bsa --release parse_timing -- --show-output`
 #[test]
 fn parse_timing() {
     use std::hint::black_box;
     use std::time::{Duration, Instant};
 
-    let bytes = load();
-    let total_data: usize = Bsa::parse(&bytes)
+    let total_data: usize = Bsa::open(BLOODMOON_BSA)
         .unwrap()
         .files
         .iter()
-        .map(|f| f.data.len())
+        .map(|f| f.size as usize)
         .sum();
     const ITERATIONS: u32 = 20;
 
@@ -69,10 +61,10 @@ fn parse_timing() {
     let mut file_count = 0;
     for _ in 0..ITERATIONS {
         let start = Instant::now();
-        let bsa = Bsa::parse(&bytes).expect("parse should succeed");
+        let bsa = Bsa::open(BLOODMOON_BSA).expect("open should succeed");
         let mut acc = 0u64;
         for f in &bsa.files {
-            acc = fold(acc, &f.data);
+            acc = fold(acc, bsa.bytes(f));
         }
         let elapsed = start.elapsed();
         checksum ^= acc;
