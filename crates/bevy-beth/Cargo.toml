@@ -9,5 +9,15 @@ tes3-bsa = { workspace = true }
 tes-nif = { workspace = true }
 bevy = { workspace = true }
 
+[features]
+# Pulls in Bevy's 3D renderer + windowing so models can be drawn on screen. Off by default
+# to keep the headless asset-loading path lightweight; the `render_nif` example needs it.
+# `bevy/3d` is the umbrella feature for the 3D pipeline (render, core pipeline, PBR, winit).
+render = ["bevy/3d"]
+
 [dev-dependencies]
 clap = { workspace = true }
+
+[[example]]
+name = "render_nif"
+required-features = ["render"]
