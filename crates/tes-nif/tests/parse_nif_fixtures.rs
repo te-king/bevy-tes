@@ -58,6 +58,27 @@ fn parses_raindrop() {
 }
 
 #[test]
+fn parses_beer_barrel() {
+    // A NiNode root over a single NiTriShape (lidded stein: body, lid and handle).
+    check("BeerBarrel.NIF", 6, true);
+}
+
+#[test]
+fn beer_barrel_has_geometry() {
+    let Some(bytes) = read_fixture("BeerBarrel.NIF") else {
+        return;
+    };
+    let nif = Nif::parse(&bytes).expect("parse beer barrel");
+    let shapes: Vec<_> = nif.tri_shapes().collect();
+    assert_eq!(shapes.len(), 1, "beer barrel has one tri shape");
+    let (_, mesh) = shapes[0];
+    assert_eq!(mesh.vertices.len(), 398);
+    assert_eq!(mesh.triangles.len(), 511);
+    // One normal per vertex.
+    assert_eq!(mesh.normals.len(), mesh.vertices.len());
+}
+
+#[test]
 fn cursor_has_geometry() {
     let Some(bytes) = read_fixture("cursor.nif") else {
         return;
