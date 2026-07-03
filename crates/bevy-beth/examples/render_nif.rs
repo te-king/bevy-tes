@@ -25,6 +25,7 @@ use std::f32::consts::PI;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
 use bevy::window::{ExitCondition, WindowResolution};
@@ -56,6 +57,9 @@ struct Model {
     /// Radius of the model's bounding sphere about its center, used to place the camera.
     radius: f32,
     center: Vec3,
+    /// Height of the model's lowest point relative to its center, where the ground plane
+    /// sits. Negative (the feet are below the center).
+    floor_y: f32,
 }
 
 /// Screenshot destination; absent in `--interactive` mode.
@@ -96,7 +100,9 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let (center, radius) = bounding_sphere(&mesh);
+    let (center, radius, min_y) = bounding_sphere(&mesh);
+    // The model is shifted by -center at spawn, so its lowest point lands at min_y - center.y.
+    let floor_y = min_y - center.y;
     println!(
         "Loaded {} — {} tri shape(s), bounds r={radius:.1} about {center:?}",
         args.path.display(),
@@ -108,6 +114,7 @@ fn main() -> ExitCode {
         mesh,
         radius,
         center,
+        floor_y,
     })
     .add_systems(Startup, setup);
 
@@ -178,25 +185,49 @@ fn setup(
             Transform::from_translation(-model.center),
         ));
 
-    // Frame the model: pull the camera back proportionally to its size.
     let r = model.radius.max(0.001);
+
+    // A ground plane at the model's feet to catch its shadow. It's sized generously so the
+    // shadow never falls off the edge, and sits a hair below the lowest vertex.
+    let ground = meshes.add(Plane3d::default().mesh().size(r * 20.0, r * 20.0));
+    let ground_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.35, 0.35, 0.38),
+        perceptual_roughness: 1.0,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(ground),
+        MeshMaterial3d(ground_material),
+        Transform::from_xyz(0.0, model.floor_y - r * 0.01, 0.0),
+    ));
+
+    // Frame the model: pull the camera back proportionally to its size.
     let cam_pos = Vec3::new(0.0, r * 0.6, r * 2.5);
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(cam_pos).looking_at(Vec3::ZERO, Vec3::Y),
-        // Ambient fill so faces turned away from the key light aren't pure black.
+        // Ambient fill so faces turned away from the key light aren't pure black. Kept low so
+        // the cast shadow still reads.
         AmbientLight {
-            brightness: 400.0,
+            brightness: 200.0,
             ..default()
         },
     ));
 
+    // Key light: casts shadows, with the cascade sized to the model so the shadow map has
+    // enough resolution over the scene regardless of model scale.
     commands.spawn((
         DirectionalLight {
             illuminance: 6_000.0,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(1.0, 2.0, 1.5).looking_at(Vec3::ZERO, Vec3::Y),
+        CascadeShadowConfigBuilder {
+            maximum_distance: r * 8.0,
+            ..default()
+        }
+        .build(),
     ));
 }
 
@@ -246,15 +277,16 @@ fn default_screenshot_path(nif: &std::path::Path) -> PathBuf {
     std::env::temp_dir().join(format!("render_nif-{stem}.png"))
 }
 
-/// Compute the model's bounding-sphere center and radius from its vertex positions.
-fn bounding_sphere(mesh: &Mesh) -> (Vec3, f32) {
+/// Compute the model's bounding-sphere center and radius, plus its axis-aligned minimum
+/// `y` (its lowest point), from the vertex positions.
+fn bounding_sphere(mesh: &Mesh) -> (Vec3, f32, f32) {
     let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
-        return (Vec3::ZERO, 1.0);
+        return (Vec3::ZERO, 1.0, -1.0);
     };
     if positions.is_empty() {
-        return (Vec3::ZERO, 1.0);
+        return (Vec3::ZERO, 1.0, -1.0);
     }
 
     let mut min = Vec3::splat(f32::INFINITY);
@@ -269,5 +301,5 @@ fn bounding_sphere(mesh: &Mesh) -> (Vec3, f32) {
         .iter()
         .map(|&[x, y, z]| Vec3::new(x, y, z).distance(center))
         .fold(0.0_f32, f32::max);
-    (center, radius)
+    (center, radius, min.y)
 }
