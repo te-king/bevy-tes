@@ -5,12 +5,15 @@
 //! keeps the dependency direction one-way: the parser crates know nothing of Bevy; only
 //! this crate bridges the two.
 //!
-//! Today it exposes [`nif_to_mesh`] (behind the `render` feature). Material and texture
-//! conversion are still to come; planned work leans on the `image` / `ddsfile` crates for
-//! texture decoding rather than hand-rolling DDS.
+//! Today it exposes [`nif_to_mesh`] (geometry), [`nif_base_texture`] (the diffuse texture
+//! filename a model references) and [`texture_to_image`] (decoding that texture's bytes) —
+//! all behind the `render` feature. DDS decoding is delegated to Bevy's own image loader
+//! rather than hand-rolling it.
 
 #[cfg(feature = "render")]
 use bevy::asset::RenderAssetUsages;
+#[cfg(feature = "render")]
+use bevy::image::{CompressedImageFormats, Image, ImageSampler, ImageType};
 #[cfg(feature = "render")]
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 #[cfg(feature = "render")]
@@ -31,7 +34,8 @@ pub fn nif_to_mesh(nif: &Nif) -> Option<Mesh> {
     let mut uvs: Vec<[f32; 2]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    for (transform, tri) in nif.tri_shapes() {
+    for shape in nif.tri_shapes() {
+        let (transform, tri) = (shape.transform, shape.mesh);
         if tri.vertices.is_empty() || tri.triangles.is_empty() {
             continue;
         }
@@ -78,4 +82,36 @@ pub fn nif_to_mesh(nif: &Nif) -> Option<Mesh> {
 #[cfg(feature = "render")]
 fn z_up_to_y_up([x, y, z]: [f32; 3]) -> [f32; 3] {
     [x, z, -y]
+}
+
+/// The base-colour texture filename referenced by the model, e.g. `Tx_BeerStein.dds`.
+///
+/// Returns the first textured shape's base texture. [`nif_to_mesh`] merges all shapes into a
+/// single mesh, so a single base texture is the natural pairing; models that use several
+/// distinct textures across shapes aren't represented yet. `None` when no shape names one.
+#[cfg(feature = "render")]
+pub fn nif_base_texture(nif: &Nif) -> Option<String> {
+    nif.tri_shapes()
+        .find_map(|shape| shape.base_texture)
+        .map(|name| name.decode().into_owned())
+}
+
+/// Decode texture bytes into a Bevy [`Image`], treating them as sRGB base-colour data.
+///
+/// Morrowind ships BC-compressed (DXT1/3/5) DDS textures; decoding is Bevy's own DDS loader
+/// (the `dds` feature, pulled in by this crate's `render` feature), so the compressed data
+/// is uploaded to the GPU as-is. `format` is the file extension (e.g. `"dds"`). Returns
+/// `None` if the bytes can't be decoded in that format.
+#[cfg(feature = "render")]
+pub fn texture_to_image(bytes: &[u8], format: &str) -> Option<Image> {
+    Image::from_buffer(
+        bytes,
+        ImageType::Extension(format),
+        // Morrowind textures are BC (S3TC); every desktop GPU Bevy targets supports it.
+        CompressedImageFormats::BC,
+        true, // base-colour maps are authored in sRGB
+        ImageSampler::Default,
+        RenderAssetUsages::default(),
+    )
+    .ok()
 }

@@ -39,7 +39,7 @@ fn parses_a_static_mesh_with_geometry() {
         .expect("at least one .nif parses with geometry");
 
     assert_eq!(parsed.header.version, VERSION_TES3);
-    let (_, mesh) = parsed.tri_shapes().next().unwrap();
+    let mesh = parsed.tri_shapes().next().unwrap().mesh;
     assert!(!mesh.vertices.is_empty(), "mesh has vertices");
     assert!(!mesh.triangles.is_empty(), "mesh has triangles");
     // Every triangle index must be in range for the vertex buffer.

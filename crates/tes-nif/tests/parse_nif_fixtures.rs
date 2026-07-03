@@ -1,4 +1,4 @@
-//! Parse the real Morrowind `.nif` fixtures kept in this crate's `tests` dir.
+//! Parse the real Morrowind `.nif` fixtures kept under the workspace `data/meshes` dir.
 //!
 //! The files are (gitignored, locally supplied) game data; each test skips when its file
 //! isn't present, so a fresh checkout without the assets still passes.
@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 use tes_nif::{Block, Nif, VERSION_TES3};
 
-/// Resolve a fixture path next to this test file.
+/// Resolve a mesh fixture under the workspace `data/meshes` directory.
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests")).join(name)
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/meshes")).join(name)
 }
 
 /// Read a fixture's bytes, or `None` (with a skip notice) when it isn't present.
@@ -71,11 +71,27 @@ fn beer_barrel_has_geometry() {
     let nif = Nif::parse(&bytes).expect("parse beer barrel");
     let shapes: Vec<_> = nif.tri_shapes().collect();
     assert_eq!(shapes.len(), 1, "beer barrel has one tri shape");
-    let (_, mesh) = shapes[0];
+    let mesh = shapes[0].mesh;
     assert_eq!(mesh.vertices.len(), 398);
     assert_eq!(mesh.triangles.len(), 511);
     // One normal per vertex.
     assert_eq!(mesh.normals.len(), mesh.vertices.len());
+    // A UV per vertex so the base texture can be applied.
+    assert_eq!(mesh.uvs.len(), mesh.vertices.len());
+}
+
+#[test]
+fn beer_barrel_references_its_texture() {
+    let Some(bytes) = read_fixture("BeerBarrel.NIF") else {
+        return;
+    };
+    let nif = Nif::parse(&bytes).expect("parse beer barrel");
+    let shape = nif.tri_shapes().next().expect("one tri shape");
+    let texture = shape
+        .base_texture
+        .expect("beer barrel resolves a base texture")
+        .decode();
+    assert_eq!(texture, "Tx_BeerStein.dds");
 }
 
 #[test]
@@ -86,7 +102,7 @@ fn cursor_has_geometry() {
     let nif = Nif::parse(&bytes).expect("parse cursor");
     let shapes: Vec<_> = nif.tri_shapes().collect();
     assert_eq!(shapes.len(), 1, "cursor has one tri shape");
-    let (_, mesh) = shapes[0];
+    let mesh = shapes[0].mesh;
     assert_eq!(mesh.vertices.len(), 4);
     assert_eq!(mesh.triangles.len(), 2);
     assert_eq!(mesh.normals.len(), 4);

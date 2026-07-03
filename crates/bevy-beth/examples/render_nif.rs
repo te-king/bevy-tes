@@ -7,22 +7,24 @@
 //! cargo run -p bevy-beth --example render_nif --features render -- path/to/model.nif
 //! ```
 //!
-//! Try a bundled fixture (needs no game data):
+//! Try a local fixture from the `data/` tree (see `data/README.md`):
 //!
 //! ```text
 //! cargo run -p bevy-beth --example render_nif --features render -- \
-//!     crates/tes-nif/tests/cursor.nif
+//!     data/meshes/cursor.nif
 //! ```
 //!
 //! Pass `-o out.png` to choose where the screenshot lands, or `--interactive` to instead
 //! open a live window that slowly rotates the model for inspection from all sides.
 //!
 //! The NIF is parsed and converted to a Bevy [`Mesh`] up front (see
-//! [`bevy_beth::convert::nif_to_mesh`]). Only static-mesh NIFs are supported — animated,
+//! [`bevy_beth::convert::nif_to_mesh`]). If the model names a base-colour texture, it is
+//! resolved against a sibling `textures/` directory (e.g. `data/textures/`) and decoded via
+//! [`bevy_beth::convert::texture_to_image`]. Only static-mesh NIFs are supported — animated,
 //! skinned and particle models will report an unsupported-block error.
 
 use std::f32::consts::PI;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use bevy::light::CascadeShadowConfigBuilder;
@@ -31,7 +33,7 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_dis
 use bevy::window::{ExitCondition, WindowResolution};
 use clap::Parser;
 
-use bevy_beth::convert::nif_to_mesh;
+use bevy_beth::convert::{nif_base_texture, nif_to_mesh, texture_to_image};
 use tes_nif::Nif;
 
 /// Render a TES3 `.nif` model with Bevy.
@@ -60,6 +62,8 @@ struct Model {
     /// Height of the model's lowest point relative to its center, where the ground plane
     /// sits. Negative (the feet are below the center).
     floor_y: f32,
+    /// Decoded base-colour texture, when the model names one that could be found and read.
+    texture: Option<Image>,
 }
 
 /// Screenshot destination; absent in `--interactive` mode.
@@ -109,12 +113,15 @@ fn main() -> ExitCode {
         nif.tri_shapes().count(),
     );
 
+    let texture = load_base_texture(&nif, &args.path);
+
     let mut app = App::new();
     app.insert_resource(Model {
         mesh,
         radius,
         center,
         floor_y,
+        texture,
     })
     .add_systems(Startup, setup);
 
@@ -157,10 +164,19 @@ fn setup(
     capture: Option<Res<Capture>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let mesh = meshes.add(model.mesh.clone());
+    // With a texture, keep base_color white so the map shows its true colours (base_color
+    // multiplies the texture); untextured models get a neutral tan so they still read.
+    let base_color_texture = model.texture.clone().map(|img| images.add(img));
     let material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.8, 0.7, 0.6),
+        base_color: if base_color_texture.is_some() {
+            Color::WHITE
+        } else {
+            Color::srgb(0.8, 0.7, 0.6)
+        },
+        base_color_texture,
         perceptual_roughness: 0.9,
         double_sided: true,
         cull_mode: None,
@@ -272,9 +288,53 @@ fn capture(
 }
 
 /// Default screenshot path: system temp dir, named after the model file.
-fn default_screenshot_path(nif: &std::path::Path) -> PathBuf {
+fn default_screenshot_path(nif: &Path) -> PathBuf {
     let stem = nif.file_stem().and_then(|s| s.to_str()).unwrap_or("model");
     std::env::temp_dir().join(format!("render_nif-{stem}.png"))
+}
+
+/// Resolve, read and decode the model's base-colour texture, printing what happened. Returns
+/// `None` (having warned) if the model names no texture, the file can't be found, or it
+/// won't decode — the model then renders untextured rather than failing the run.
+fn load_base_texture(nif: &Nif, nif_path: &Path) -> Option<Image> {
+    let name = nif_base_texture(nif)?;
+    let Some(path) = resolve_texture(nif_path, &name) else {
+        eprintln!("  texture {name:?} referenced but not found near {}", nif_path.display());
+        return None;
+    };
+    let bytes = std::fs::read(&path)
+        .map_err(|e| eprintln!("  cannot read texture {}: {e}", path.display()))
+        .ok()?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("dds");
+    match texture_to_image(&bytes, ext) {
+        Some(img) => {
+            println!("  base texture: {}", path.display());
+            Some(img)
+        }
+        None => {
+            eprintln!("  failed to decode texture {}", path.display());
+            None
+        }
+    }
+}
+
+/// Locate a NIF-referenced texture on disk. NIF texture names use Windows separators and may
+/// carry a `textures\` prefix, so we reduce to the bare filename and look in the likely
+/// directories: a sibling `textures/` (as in `data/meshes` → `data/textures`), the model's
+/// own directory, and a `textures/` beneath it.
+fn resolve_texture(nif_path: &Path, tex_name: &str) -> Option<PathBuf> {
+    let base = tex_name.rsplit(['\\', '/']).next().unwrap_or(tex_name);
+    let nif_dir = nif_path.parent().unwrap_or_else(|| Path::new("."));
+    let candidates = [
+        nif_dir.parent().map(|p| p.join("textures")),
+        Some(nif_dir.to_path_buf()),
+        Some(nif_dir.join("textures")),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|dir| dir.join(base))
+        .find(|p| p.exists())
 }
 
 /// Compute the model's bounding-sphere center and radius, plus its axis-aligned minimum

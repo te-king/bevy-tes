@@ -2,8 +2,18 @@
 .DS_Store
 
 # Bethesda game data — large, copyrighted, supplied locally (not redistributable).
-# Tests expect e.g. crates/beth-esm/tests/Morrowind.esm to be present when running them.
+# Test fixtures live under /data (see data/README.md); the whole tree is ignored, but the
+# README is force-tracked so the expected layout is documented for a fresh checkout.
+/data/*
+!/data/README.md
+
+# Defence in depth: never commit game assets wherever else they might land. Extensions are
+# matched case-sensitively by git, so list the upper-case variants Morrowind actually ships.
 *.esm
 *.esp
 *.bsa
 *.nif
+*.NIF
+*.dds
+*.tga
+*.bmp

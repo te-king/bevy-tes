@@ -9,20 +9,26 @@
 //! fully decode the current block's body. So traversal requires a body parser per block
 //! type — there is no generic "skip unknown" path.
 //!
-//! This crate decodes the **static-mesh block graph** — the blocks needed to get triangle
-//! geometry out of a model: [`Block::Node`] (`NiNode` and friends), [`Block::TriShape`]
-//! (`NiTriShape`) and [`Block::TriShapeData`] (`NiTriShapeData`, the actual mesh). The
-//! various property / texture / extra-data blocks are decoded only far enough to walk past
-//! them (kept as [`Block::Other`] so block indices — which references rely on — stay
-//! aligned). Block types outside this set (particle systems, controllers, …) cause
-//! [`Nif::parse`] to fail with [`NifError::Parse`] naming the unsupported type.
+//! This crate decodes the **static-mesh block graph** — the blocks needed to get textured
+//! triangle geometry out of a model: [`Block::Node`] (`NiNode` and friends),
+//! [`Block::TriShape`] (`NiTriShape`), [`Block::TriShapeData`] (`NiTriShapeData`, the actual
+//! mesh), and the base-texture chain [`Block::TexturingProperty`] → [`Block::SourceTexture`]
+//! (which retains the diffuse texture filename). Other property / extra-data blocks are
+//! decoded only far enough to walk past them (kept as [`Block::Other`] so block indices —
+//! which references rely on — stay aligned). Block types outside this set (particle systems,
+//! controllers, …) cause [`Nif::parse`] to fail with [`NifError::Parse`] naming the
+//! unsupported type.
 //!
 //! ```no_run
 //! let bytes = std::fs::read("model.nif").unwrap();
 //! let nif = tes_nif::Nif::parse(&bytes).unwrap();
 //! assert_eq!(nif.header.version, tes_nif::VERSION_TES3);
-//! for (transform, mesh) in nif.tri_shapes() {
+//! for shape in nif.tri_shapes() {
+//!     let mesh = shape.mesh;
 //!     println!("{} vertices, {} triangles", mesh.vertices.len(), mesh.triangles.len());
+//!     if let Some(tex) = shape.base_texture {
+//!         println!("  textured with {}", tex.decode());
+//!     }
 //! }
 //! ```
 
@@ -139,15 +145,26 @@ pub enum Block {
         transform: NifTransform,
         children: Vec<i32>,
     },
-    /// `NiTriShape`: a transform plus a reference to its [`Block::TriShapeData`].
+    /// `NiTriShape`: a transform, a reference to its [`Block::TriShapeData`], and the block
+    /// references of its attached properties (used to resolve its texture and material).
     TriShape {
         transform: NifTransform,
         /// Block index of the geometry data, or `-1` for none.
         data: i32,
+        /// Block indices of attached property blocks (texturing, material, alpha, …).
+        properties: Vec<i32>,
     },
     /// `NiTriShapeData`: the actual triangle geometry.
     TriShapeData(TriMesh),
-    /// A block parsed past but not represented (properties, textures, extra data, …).
+    /// `NiTexturingProperty`: retains the block reference of the base (first-slot) texture,
+    /// i.e. the [`Block::SourceTexture`] providing the diffuse map. `-1` when that slot is
+    /// unused.
+    TexturingProperty { base_texture: i32 },
+    /// `NiSourceTexture`: an external texture reference, keeping the filename it names
+    /// (e.g. `Tx_BeerStein.dds`). Empty for the internal-pixel-data case, which this crate
+    /// doesn't decode.
+    SourceTexture { file_name: L1String },
+    /// A block parsed past but not represented (material, alpha, extra data, …).
     Other,
 }
 
@@ -188,21 +205,57 @@ impl Nif {
         Ok(Nif { header, blocks })
     }
 
-    /// Iterate every `NiTriShape` paired with its geometry, as
-    /// `(transform, &TriMesh)`. Only the shape's own local transform is reported; ancestor
-    /// `NiNode` transforms are not composed in.
-    pub fn tri_shapes(&self) -> impl Iterator<Item = (NifTransform, &TriMesh)> {
+    /// Iterate every `NiTriShape` in the file as a [`Shape`] — its geometry paired with the
+    /// base texture it resolves to. Only the shape's own local transform is reported;
+    /// ancestor `NiNode` transforms are not composed in.
+    pub fn tri_shapes(&self) -> impl Iterator<Item = Shape<'_>> {
         self.blocks.iter().filter_map(|b| match b {
-            Block::TriShape { transform, data } => {
-                let mesh = self.blocks.get(*data as usize).and_then(|d| match d {
-                    Block::TriShapeData(m) => Some(m),
-                    _ => None,
-                })?;
-                Some((*transform, mesh))
+            Block::TriShape {
+                transform,
+                data,
+                properties,
+            } => {
+                let mesh = match self.blocks.get(*data as usize)? {
+                    Block::TriShapeData(m) => m,
+                    _ => return None,
+                };
+                Some(Shape {
+                    transform: *transform,
+                    mesh,
+                    base_texture: self.base_texture(properties),
+                })
             }
             _ => None,
         })
     }
+
+    /// Resolve a shape's base-colour texture filename by walking its property references to
+    /// the first [`Block::TexturingProperty`], then following that to its
+    /// [`Block::SourceTexture`]. `None` when the shape has no external base texture.
+    fn base_texture(&self, properties: &[i32]) -> Option<&L1String> {
+        for &p in properties {
+            if let Some(Block::TexturingProperty { base_texture }) = self.blocks.get(p as usize)
+                && let Some(Block::SourceTexture { file_name }) =
+                    self.blocks.get(*base_texture as usize)
+                && !file_name.decode().is_empty()
+            {
+                return Some(file_name);
+            }
+        }
+        None
+    }
+}
+
+/// A `NiTriShape` resolved to its geometry and base texture, produced by [`Nif::tri_shapes`].
+#[derive(Debug, Clone, Copy)]
+pub struct Shape<'a> {
+    /// The shape's own local transform; ancestor `NiNode` transforms are not composed in.
+    pub transform: NifTransform,
+    /// The triangle geometry from the shape's `NiTriShapeData`.
+    pub mesh: &'a TriMesh,
+    /// Base-colour texture filename (first `NiTexturingProperty` slot), if any — e.g.
+    /// `Tx_BeerStein.dds`. Resolve it against a texture directory or `Morrowind.bsa`.
+    pub base_texture: Option<&'a L1String>,
 }
 
 /// Parse the version-4.0.0.2 header: identifier line (terminated by `\n`), then the
@@ -350,18 +403,20 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
             }
         }
         "NiTriShape" => {
-            let (transform, _props) = av_object(r)?;
+            let (transform, properties) = av_object(r)?;
             let data = r.i32()?;
             let _skin = r.i32()?;
-            Block::TriShape { transform, data }
+            Block::TriShape {
+                transform,
+                data,
+                properties,
+            }
         }
         "NiTriShapeData" => Block::TriShapeData(tri_shape_data(r)?),
 
-        // Properties: decoded only enough to skip past them.
-        "NiTexturingProperty" => {
-            texturing_property(r)?;
-            Block::Other
-        }
+        "NiTexturingProperty" => Block::TexturingProperty {
+            base_texture: texturing_property(r)?,
+        },
         "NiMaterialProperty" => {
             ni_object_net(r)?;
             r.skip(2)?; // flags
@@ -384,10 +439,9 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
             r.skip(2)?; // flags
             Block::Other
         }
-        "NiSourceTexture" => {
-            source_texture(r)?;
-            Block::Other
-        }
+        "NiSourceTexture" => Block::SourceTexture {
+            file_name: source_texture(r)?,
+        },
         "NiStringExtraData" => {
             r.i32()?; // next extra data ref
             r.u32()?; // bytes remaining
@@ -502,38 +556,45 @@ fn tri_shape_data(r: &mut Reader) -> RResult<TriMesh> {
     })
 }
 
-/// `NiTexturingProperty`: walk past flags, apply mode and the texture descriptors.
-fn texturing_property(r: &mut Reader) -> RResult<()> {
+/// `NiTexturingProperty`: walk past flags, apply mode and the texture descriptors, returning
+/// the block reference of the base (slot 0) texture's `NiSourceTexture` (or `-1` if unused).
+fn texturing_property(r: &mut Reader) -> RResult<i32> {
     ni_object_net(r)?;
     r.u16()?; // flags
     r.u32()?; // apply mode
     let texture_count = r.u32()? as usize;
+    let mut base_texture = -1;
     for slot in 0..texture_count {
         if r.boolean()? {
             // TexDesc: source ref + clamp + filter + uv set + ps2 l/k + unknown1
-            r.skip(4 + 4 + 4 + 4 + 2 + 2 + 2)?;
+            let source = r.i32()?;
+            if slot == 0 {
+                base_texture = source;
+            }
+            r.skip(4 + 4 + 4 + 2 + 2 + 2)?; // clamp + filter + uv set + ps2 l/k + unknown1
             // The bump-map slot (index 5) carries an extra scale/offset and 2x2 matrix.
             if slot == 5 {
                 r.skip(4 * 6)?;
             }
         }
     }
-    Ok(())
+    Ok(base_texture)
 }
 
-/// `NiSourceTexture`: walk past the external filename or internal pixel data plus format
-/// flags.
-fn source_texture(r: &mut Reader) -> RResult<()> {
+/// `NiSourceTexture`: read the external filename (or walk past internal pixel data) plus the
+/// format flags, returning the filename — empty when the texture is internally embedded.
+fn source_texture(r: &mut Reader) -> RResult<L1String> {
     ni_object_net(r)?;
     let use_external = r.u8()?;
-    if use_external != 0 {
-        r.string()?; // file name
+    let file_name = if use_external != 0 {
+        r.string()?
     } else {
         r.u8()?; // unknown byte
         r.i32()?; // pixel data ref
-    }
+        L1String::default()
+    };
     r.skip(4 + 4 + 4 + 1)?; // pixel layout + mipmap format + alpha format + is static
-    Ok(())
+    Ok(file_name)
 }
 
 #[cfg(test)]
