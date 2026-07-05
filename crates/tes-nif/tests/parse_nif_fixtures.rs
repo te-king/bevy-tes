@@ -123,17 +123,18 @@ fn shack_has_multiple_textured_parts() {
 }
 
 #[test]
-fn fire_small_is_a_particle_system() {
-    // fire_small.nif is a particle effect, not a static mesh: it uses particle/controller
-    // blocks this crate intentionally does not decode. Parsing should fail cleanly naming
-    // the unsupported block rather than mis-parsing.
+fn fire_small_parses_past_its_particle_blocks() {
+    // fire_small.nif is a particle effect: particle systems, controllers and their key
+    // data. Those blocks are walked past (block sizes are implicit, so each still needs
+    // an exact body parser) and the one drawable NiTriShape underneath comes through.
     let Some(bytes) = read_fixture("fire_small.nif") else {
         return;
     };
-    let err = Nif::parse(&bytes).expect_err("fire_small should not fully parse");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("unsupported block type"),
-        "expected an unsupported-block error, got: {msg}"
+    let nif = Nif::parse(&bytes).expect("particle-system model parses");
+    assert_eq!(
+        nif.blocks.len(),
+        31,
+        "all blocks preserved (indices intact)"
     );
+    assert_eq!(nif.instances().len(), 1, "the fire's drawable base plane");
 }

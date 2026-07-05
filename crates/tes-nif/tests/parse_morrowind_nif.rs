@@ -15,9 +15,8 @@ fn parses_a_static_mesh_with_geometry() {
     let Some(bsa) = open_bsa() else {
         return;
     };
-    // Find the first `.nif` that fully parses and carries geometry. Most static meshes do;
-    // animated/skinned/particle models use blocks this crate doesn't decode and are
-    // skipped here.
+    // Find the first `.nif` that carries drawable geometry (a handful are pure particle
+    // effects with none).
     let parsed = bsa
         .files
         .iter()
@@ -42,28 +41,28 @@ fn parses_a_static_mesh_with_geometry() {
 }
 
 #[test]
-fn most_static_meshes_parse() {
+fn every_archived_mesh_parses() {
     let Some(bsa) = open_bsa() else {
         return;
     };
     let mut total = 0;
     let mut with_geometry = 0;
     for f in &bsa.files {
-        if !f.name.decode().to_ascii_lowercase().ends_with(".nif") {
+        let name = f.name.decode();
+        if !name.to_ascii_lowercase().ends_with(".nif") {
             continue;
         }
         total += 1;
-        if let Ok(nif) = Nif::parse(bsa.bytes(f))
-            && !nif.instances().is_empty()
-        {
+        let nif = Nif::parse(bsa.bytes(f)).unwrap_or_else(|e| panic!("parse {name}: {e}"));
+        if !nif.instances().is_empty() {
             with_geometry += 1;
         }
     }
     assert!(total > 0, "archive contains .nif files");
-    // The static-mesh subset is the large majority of Morrowind's models.
+    // Nearly everything is drawable; the rest are pure particle effects and the like.
     let ratio = with_geometry as f64 / total as f64;
     assert!(
-        ratio > 0.75,
-        "expected most .nif files to yield geometry, got {with_geometry}/{total}"
+        ratio > 0.95,
+        "expected nearly all .nif files to yield geometry, got {with_geometry}/{total}"
     );
 }
