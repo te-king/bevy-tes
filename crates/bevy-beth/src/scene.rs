@@ -47,10 +47,15 @@ struct SpawnEntry {
 }
 
 /// Materials are deduplicated by what actually feeds the `StandardMaterial`: the resolved
-/// texture path and the material colours (bit patterns, so `f32`s can key a map).
-type MaterialKey = (Option<String>, Option<[u32; 7]>);
+/// texture path, the material colours (bit patterns, so `f32`s can key a map) and the
+/// alpha property's flags/threshold.
+type MaterialKey = (Option<String>, Option<[u32; 7]>, Option<(u16, u8)>);
 
-fn material_key(texture: &Option<String>, material: Option<&tes_nif::Material>) -> MaterialKey {
+fn material_key(
+    texture: &Option<String>,
+    material: Option<&tes_nif::Material>,
+    alpha: Option<tes_nif::AlphaProperty>,
+) -> MaterialKey {
     let colors = material.map(|m| {
         [
             m.diffuse[0].to_bits(),
@@ -62,7 +67,11 @@ fn material_key(texture: &Option<String>, material: Option<&tes_nif::Material>) 
             m.alpha.to_bits(),
         ]
     });
-    (texture.clone(), colors)
+    (
+        texture.clone(),
+        colors,
+        alpha.map(|a| (a.flags, a.threshold)),
+    )
 }
 
 pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>) -> SceneOutput {
@@ -200,6 +209,7 @@ impl SceneBuilder<'_> {
         load_context: &mut LoadContext<'_>,
     ) -> Handle<StandardMaterial> {
         let material = self.nif.material(props);
+        let alpha = self.nif.alpha_property(props);
         let texture = self.nif.base_texture(props).and_then(|name| {
             let name = name.decode();
             let resolved = self.vfs.resolve_texture(&name);
@@ -212,7 +222,7 @@ impl SceneBuilder<'_> {
             resolved
         });
 
-        let key = material_key(&texture, material.as_ref());
+        let key = material_key(&texture, material.as_ref(), alpha);
         if let Some(handle) = self.material_index.get(&key) {
             return handle.clone();
         }
@@ -236,7 +246,7 @@ impl SceneBuilder<'_> {
 
         let handle = load_context.add_labeled_asset(
             format!("Material{}", self.materials.len()),
-            convert::nif_material(texture_handle, material.as_ref()),
+            convert::nif_material(texture_handle, material.as_ref(), alpha),
         );
         self.materials.push(handle.clone());
         self.material_index.insert(key, handle.clone());

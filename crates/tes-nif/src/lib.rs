@@ -13,9 +13,10 @@
 //! triangle geometry out of a model: [`Node`] (`NiNode` and friends), [`TriShape`]
 //! (`NiTriShape`), [`Block::TriShapeData`] (`NiTriShapeData`, the actual mesh), the
 //! base-texture chain [`TexturingProperty`] → [`SourceTexture`] (which retains the diffuse
-//! texture filename), and [`Block::MaterialProperty`] (surface colours). [`Nif::instances`]
-//! walks the scene graph from its roots, composing transforms and resolving each shape's
-//! texture and material.
+//! texture filename), [`Block::MaterialProperty`] (surface colours) and
+//! [`Block::AlphaProperty`] (blend/cutout settings). [`Nif::instances`] walks the scene
+//! graph from its roots, composing transforms and resolving each shape's texture,
+//! material and alpha settings.
 //!
 //! Every other block type Morrowind ships — animation controllers and their key data,
 //! skinning, particle systems and their modifiers, dynamic effects, cameras, embedded
@@ -259,6 +260,52 @@ pub struct SourceTexture {
     pub file_name: L1String,
 }
 
+/// `NiAlphaProperty`: how a shape's alpha channel is rendered — blending and/or cutout
+/// testing. Without one of these on a shape, Morrowind draws it fully opaque no matter
+/// what its material's alpha says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AlphaProperty {
+    /// The raw flags word; see the accessor methods for the fields inside it.
+    pub flags: u16,
+    /// Alpha-test reference value, `0`–`255`: with [`AlphaProperty::testing`] enabled,
+    /// only fragments whose alpha passes [`AlphaProperty::test_function`] against this
+    /// are drawn.
+    pub threshold: u8,
+}
+
+impl AlphaProperty {
+    /// Alpha blending enabled (bit 0).
+    pub fn blending(self) -> bool {
+        self.flags & 0x0001 != 0
+    }
+
+    /// Source blend mode (bits 1–4), a D3D-style blend factor: `0` ONE, `1` ZERO,
+    /// `2` SRC_COLOR, `3` INV_SRC_COLOR, `4` DEST_COLOR, `5` INV_DEST_COLOR,
+    /// `6` SRC_ALPHA, `7` INV_SRC_ALPHA, `8` DEST_ALPHA, `9` INV_DEST_ALPHA,
+    /// `10` SRC_ALPHA_SATURATE.
+    pub fn source_blend_mode(self) -> u16 {
+        (self.flags >> 1) & 0x000F
+    }
+
+    /// Destination blend mode (bits 5–8); same encoding as
+    /// [`AlphaProperty::source_blend_mode`].
+    pub fn dest_blend_mode(self) -> u16 {
+        (self.flags >> 5) & 0x000F
+    }
+
+    /// Alpha (cutout) testing enabled (bit 9).
+    pub fn testing(self) -> bool {
+        self.flags & 0x0200 != 0
+    }
+
+    /// Alpha-test comparison function (bits 10–12): `0` ALWAYS, `1` LESS, `2` EQUAL,
+    /// `3` LESS_EQUAL, `4` GREATER, `5` NOT_EQUAL, `6` GREATER_EQUAL, `7` NEVER.
+    /// Morrowind foliage is `GREATER` in practice.
+    pub fn test_function(self) -> u16 {
+        (self.flags >> 10) & 0x0007
+    }
+}
+
 /// One decoded NIF block. Every block in the file produces exactly one entry (in file
 /// order), so an index into [`Nif::blocks`] matches the [`BlockRef`]s stored in other
 /// blocks (e.g. [`TriShape::data`]). Blocks this crate doesn't model are kept as
@@ -275,6 +322,8 @@ pub enum Block {
     TexturingProperty(TexturingProperty),
     /// `NiMaterialProperty`: the decoded surface [`Material`].
     MaterialProperty(Material),
+    /// `NiAlphaProperty` — see [`AlphaProperty`].
+    AlphaProperty(AlphaProperty),
     /// `NiSourceTexture` — see [`SourceTexture`].
     SourceTexture(SourceTexture),
     /// A block parsed past but not represented (alpha, extra data, …).
@@ -399,6 +448,7 @@ impl Nif {
                     mesh,
                     base_texture: self.base_texture(&props),
                     material: self.material(&props),
+                    alpha: self.alpha_property(&props),
                 });
             }
             _ => {}
@@ -437,6 +487,20 @@ impl Nif {
         }
         None
     }
+
+    /// Resolve a shape's [`AlphaProperty`] from the first [`Block::AlphaProperty`] in its
+    /// (inheritance-ordered) property references. `None` when none applies — the shape
+    /// renders opaque.
+    ///
+    /// See [`Nif::base_texture`] for the expected ordering of `properties`.
+    pub fn alpha_property(&self, properties: &[BlockRef]) -> Option<AlphaProperty> {
+        for &p in properties {
+            if let Some(Block::AlphaProperty(a)) = self.block(p) {
+                return Some(*a);
+            }
+        }
+        None
+    }
 }
 
 /// A drawable `NiTriShape` located in the scene, produced by [`Nif::instances`].
@@ -451,6 +515,9 @@ pub struct ShapeInstance<'a> {
     pub base_texture: Option<&'a L1String>,
     /// Surface material (first inherited `NiMaterialProperty`), if any.
     pub material: Option<Material>,
+    /// Alpha rendering settings (first inherited `NiAlphaProperty`), if any — `None`
+    /// means the shape draws fully opaque.
+    pub alpha: Option<AlphaProperty>,
 }
 
 // --- parsing -----------------------------------------------------------------------------
@@ -643,8 +710,9 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
         "NiMaterialProperty" => Block::MaterialProperty(material_property(r)?),
         "NiAlphaProperty" => {
             ni_object_net(r)?;
-            r.skip(2 + 1)?; // flags + threshold
-            Block::Other
+            let flags = r.u16()?;
+            let threshold = r.u8()?;
+            Block::AlphaProperty(AlphaProperty { flags, threshold })
         }
         "NiVertexColorProperty" => {
             ni_object_net(r)?;
