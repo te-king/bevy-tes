@@ -22,7 +22,7 @@ enum Command {
     /// Parse a plugin (.esm/.esp) and print a summary.
     Esm {
         /// Path to the plugin file.
-        #[arg(default_value = "crates/tes3-esm/tests/Morrowind.esm")]
+        #[arg(default_value = "data/Morrowind.esm")]
         path: PathBuf,
     },
     /// Inspect or extract from a BSA archive.

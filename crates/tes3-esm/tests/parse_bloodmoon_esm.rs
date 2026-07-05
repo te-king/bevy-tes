@@ -8,15 +8,9 @@ use std::collections::BTreeMap;
 
 use tes3_esm::{Plugin, Record};
 
-const ESM_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Bloodmoon.esm");
-
 /// The file is gitignored, locally supplied game data; `None` means skip the test.
 fn load_bytes() -> Option<Vec<u8>> {
-    if !std::path::Path::new(ESM_PATH).exists() {
-        eprintln!("skipping: {ESM_PATH} not present");
-        return None;
-    }
-    Some(std::fs::read(ESM_PATH).expect("Bloodmoon.esm should be readable"))
+    tes_testdata::read("Bloodmoon.esm")
 }
 
 #[test]

@@ -12,3 +12,4 @@ tes-core = { workspace = true }
 [dev-dependencies]
 # Tests pull a real .nif out of a BSA archive to exercise the parser.
 tes3-bsa = { workspace = true }
+tes-testdata = { workspace = true }

@@ -1,0 +1,10 @@
+[package]
+name = "tes-testdata"
+description = "Internal test-support crate: locates the workspace's (gitignored) game-data directory"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

@@ -14,6 +14,7 @@ tes-core = { path = "crates/tes-core" }
 tes3-esm = { path = "crates/tes3-esm" }
 tes3-bsa = { path = "crates/tes3-bsa" }
 tes-nif = { path = "crates/tes-nif" }
+tes-testdata = { path = "crates/tes-testdata" }
 
 # Third-party.
 nom = "8"

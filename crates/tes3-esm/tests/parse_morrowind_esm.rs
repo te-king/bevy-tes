@@ -1,4 +1,5 @@
-//! End-to-end test parsing the bundled `Morrowind.esm` test file.
+//! End-to-end test parsing the `Morrowind.esm` master (gitignored, locally supplied
+//! game data; the tests skip themselves when it isn't present).
 //!
 //! The reference counts come from an independent scan of the file's record framing and
 //! must match exactly, proving the parser consumes every record with no leftover bytes.
@@ -7,17 +8,11 @@ use std::collections::BTreeMap;
 
 use tes3_esm::{Plugin, Record};
 
-const ESM_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Morrowind.esm");
-
 /// Read the file into an owned buffer to parse. The parsed `Plugin` owns its data, so it
 /// no longer depends on this buffer once parsing returns. The file is gitignored,
 /// locally supplied game data; `None` means skip the test.
 fn load_bytes() -> Option<Vec<u8>> {
-    if !std::path::Path::new(ESM_PATH).exists() {
-        eprintln!("skipping: {ESM_PATH} not present");
-        return None;
-    }
-    Some(std::fs::read(ESM_PATH).expect("Morrowind.esm should be readable"))
+    tes_testdata::read("Morrowind.esm")
 }
 
 #[test]

@@ -6,7 +6,7 @@
 //! zero-copy slices into the mapping:
 //!
 //! ```no_run
-//! let bsa = tes3_bsa::Bsa::open("crates/tes3-bsa/tests/Morrowind.bsa").unwrap();
+//! let bsa = tes3_bsa::Bsa::open("data/Morrowind.bsa").unwrap();
 //! if let Some(bytes) = bsa.get(r"meshes\m\probe_journeyman_01.nif") {
 //!     println!("{} bytes", bytes.len());
 //! }

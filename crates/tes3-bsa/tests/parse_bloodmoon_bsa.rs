@@ -1,18 +1,10 @@
 //! End-to-end tests parsing the `Bloodmoon.bsa` archive (gitignored, locally supplied
 //! game data; the tests skip themselves when it isn't present).
 
-use std::path::Path;
-
 use tes3_bsa::Bsa;
 
-const BLOODMOON_BSA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Bloodmoon.bsa");
-
 fn open_bsa() -> Option<Bsa> {
-    if !Path::new(BLOODMOON_BSA).exists() {
-        eprintln!("skipping: {BLOODMOON_BSA} not present");
-        return None;
-    }
-    Some(Bsa::open(BLOODMOON_BSA).expect("open bsa"))
+    Some(Bsa::open(tes_testdata::fixture("Bloodmoon.bsa")?).expect("open bsa"))
 }
 
 #[test]
@@ -58,9 +50,15 @@ fn parse_timing() {
     use std::hint::black_box;
     use std::time::{Duration, Instant};
 
-    let Some(bsa) = open_bsa() else { return };
-    let total_data: usize = bsa.files.iter().map(|f| f.size as usize).sum();
-    drop(bsa);
+    let Some(path) = tes_testdata::fixture("Bloodmoon.bsa") else {
+        return;
+    };
+    let total_data: usize = Bsa::open(&path)
+        .expect("open bsa")
+        .files
+        .iter()
+        .map(|f| f.size as usize)
+        .sum();
     const ITERATIONS: u32 = 20;
 
     let mut total = Duration::ZERO;
@@ -69,7 +67,7 @@ fn parse_timing() {
     let mut file_count = 0;
     for _ in 0..ITERATIONS {
         let start = Instant::now();
-        let bsa = Bsa::open(BLOODMOON_BSA).expect("open should succeed");
+        let bsa = Bsa::open(&path).expect("open should succeed");
         let mut acc = 0u64;
         for f in &bsa.files {
             acc = fold(acc, bsa.bytes(f));
