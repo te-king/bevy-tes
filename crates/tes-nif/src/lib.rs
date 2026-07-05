@@ -143,40 +143,47 @@ impl Nif {
         }
     }
 
-    /// Walk the scene graph from the roots, yielding a [`ShapeInstance`] for every drawable
-    /// `NiTriShape` with its **world** transform composed down the tree. Hidden nodes/shapes
-    /// and `RootCollisionNode` subtrees are skipped, and each shape's texture and material are
-    /// resolved with property inheritance (the shape's own properties take precedence over an
-    /// ancestor's).
-    pub fn instances(&self) -> Vec<ShapeInstance<'_>> {
-        let mut out = Vec::new();
+    /// Depth-first walk of the drawable scene graph, calling `visit` with a [`WalkEvent`]
+    /// for every visible node and shape. This is **the** traversal — every consumer
+    /// (including [`Nif::instances`]) goes through it, so the rules live in one place:
+    ///
+    /// - hidden nodes/shapes and `RootCollisionNode` subtrees are skipped entirely;
+    /// - a [`WalkEvent::EnterNode`]'s children (and nested descendants) arrive before its
+    ///   matching [`WalkEvent::LeaveNode`], so a consumer can maintain parent state with
+    ///   a stack;
+    /// - each shape's texture/material/alpha arrive already resolved with property
+    ///   inheritance (the shape's own properties take precedence over an ancestor's,
+    ///   nearer ancestors over farther ones).
+    ///
+    /// Transforms are **local** ([`Node::transform`] / [`TriShape::transform`]); compose
+    /// them down the tree if world space is needed (see [`Nif::instances`]).
+    pub fn walk<'a>(&'a self, mut visit: impl FnMut(WalkEvent<'a>)) {
         for &root in self.scene_roots() {
-            self.collect_instances(root, &NifTransform::default(), &[], &mut out);
+            self.walk_from(root, &[], &mut visit);
         }
-        out
     }
 
-    /// Depth-first traversal helper. `world` is the accumulated transform above `block`;
-    /// `inherited` is the ancestors' property references, nearest first.
-    fn collect_instances<'a>(
+    /// Recursive helper for [`Nif::walk`]. `inherited` is the ancestors' property
+    /// references, nearest first.
+    fn walk_from<'a>(
         &'a self,
         block: BlockRef,
-        world: &NifTransform,
         inherited: &[BlockRef],
-        out: &mut Vec<ShapeInstance<'a>>,
+        visit: &mut impl FnMut(WalkEvent<'a>),
     ) {
         match self.block(block) {
             Some(Block::Node(node)) => {
                 if node.hidden || node.collision {
                     return;
                 }
-                let node_world = world.compose(&node.transform);
                 // A node's own properties sit nearer to descendants than its ancestors'.
                 let mut props = node.properties.clone();
                 props.extend_from_slice(inherited);
+                visit(WalkEvent::EnterNode { block, node });
                 for &child in &node.children {
-                    self.collect_instances(child, &node_world, &props, out);
+                    self.walk_from(child, &props, visit);
                 }
+                visit(WalkEvent::LeaveNode);
             }
             Some(Block::TriShape(shape)) => {
                 if shape.hidden {
@@ -187,8 +194,9 @@ impl Nif {
                 };
                 let mut props = shape.properties.clone();
                 props.extend_from_slice(inherited);
-                out.push(ShapeInstance {
-                    transform: world.compose(&shape.transform),
+                visit(WalkEvent::Shape {
+                    block,
+                    shape,
                     mesh,
                     base_texture: self.base_texture(&props),
                     material: self.material(&props),
@@ -197,6 +205,43 @@ impl Nif {
             }
             _ => {}
         }
+    }
+
+    /// Walk the scene graph from the roots, yielding a [`ShapeInstance`] for every drawable
+    /// `NiTriShape` with its **world** transform composed down the tree. A flattened view
+    /// over [`Nif::walk`] for consumers that don't care about the node hierarchy.
+    pub fn instances(&self) -> Vec<ShapeInstance<'_>> {
+        let mut out = Vec::new();
+        let mut world = vec![NifTransform::default()];
+        self.walk(|event| match event {
+            WalkEvent::EnterNode { node, .. } => {
+                let top = *world.last().expect("stack starts non-empty");
+                world.push(top.compose(&node.transform));
+            }
+            WalkEvent::LeaveNode => {
+                world.pop();
+            }
+            WalkEvent::Shape {
+                shape,
+                mesh,
+                base_texture,
+                material,
+                alpha,
+                ..
+            } => {
+                out.push(ShapeInstance {
+                    transform: world
+                        .last()
+                        .expect("stack starts non-empty")
+                        .compose(&shape.transform),
+                    mesh,
+                    base_texture,
+                    material,
+                    alpha,
+                });
+            }
+        });
+        out
     }
 
     /// Resolve a shape's base-colour texture filename by walking its (inheritance-ordered)
@@ -247,6 +292,37 @@ impl Nif {
     }
 }
 
+/// One step of a [`Nif::walk`] traversal.
+///
+/// Only *visible* content produces events: hidden nodes/shapes and `RootCollisionNode`
+/// subtrees are skipped before any event fires for them.
+#[derive(Debug, Clone, Copy)]
+pub enum WalkEvent<'a> {
+    /// Descending into a visible node. Events for its children follow, then the matching
+    /// [`WalkEvent::LeaveNode`].
+    EnterNode {
+        /// The node's own reference (e.g. for naming entities by block index).
+        block: BlockRef,
+        node: &'a Node,
+    },
+    /// Ascending out of the most recently entered node.
+    LeaveNode,
+    /// A drawable shape, its surface already resolved through property inheritance.
+    Shape {
+        /// The shape's own reference (e.g. for naming entities by block index).
+        block: BlockRef,
+        shape: &'a TriShape,
+        /// The shape's geometry ([`TriShape::data`], resolved).
+        mesh: &'a TriMesh,
+        /// Base-colour texture filename (first inherited `NiTexturingProperty` slot).
+        base_texture: Option<&'a L1String>,
+        /// Surface material (first inherited `NiMaterialProperty`).
+        material: Option<Material>,
+        /// Alpha settings (first inherited `NiAlphaProperty`); `None` renders opaque.
+        alpha: Option<AlphaProperty>,
+    },
+}
+
 /// A drawable `NiTriShape` located in the scene, produced by [`Nif::instances`].
 #[derive(Debug, Clone, Copy)]
 pub struct ShapeInstance<'a> {
@@ -262,4 +338,111 @@ pub struct ShapeInstance<'a> {
     /// Alpha rendering settings (first inherited `NiAlphaProperty`), if any — `None`
     /// means the shape draws fully opaque.
     pub alpha: Option<AlphaProperty>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A synthetic block graph exercising every traversal rule:
+    ///
+    /// ```text
+    /// 0 Node (props: material A, translation +Z)
+    /// ├── 1 Node (translation +2Y)
+    /// │   └── 3 TriShape (props: material B — overrides inherited A)
+    /// ├── 2 TriShape (hidden — skipped)
+    /// ├── 6 Node (collision — subtree skipped)
+    /// │   └── 4 TriShape
+    /// └── 7 TriShape (translation +X; inherits material A)
+    /// ```
+    fn synthetic_nif() -> Nif {
+        let node = |translation, children: Vec<i32>, properties: Vec<i32>, collision| {
+            Block::Node(Node {
+                transform: NifTransform {
+                    translation,
+                    ..Default::default()
+                },
+                children: children.into_iter().map(BlockRef).collect(),
+                properties: properties.into_iter().map(BlockRef).collect(),
+                hidden: false,
+                collision,
+            })
+        };
+        let shape = |translation, properties: Vec<i32>, hidden| {
+            Block::TriShape(TriShape {
+                transform: NifTransform {
+                    translation,
+                    ..Default::default()
+                },
+                data: BlockRef(9),
+                properties: properties.into_iter().map(BlockRef).collect(),
+                hidden,
+            })
+        };
+        let material = |glossiness| {
+            Block::MaterialProperty(Material {
+                glossiness,
+                ..Default::default()
+            })
+        };
+
+        Nif {
+            header: NifHeader::default(),
+            blocks: vec![
+                node([0.0, 0.0, 1.0], vec![1, 2, 6, 7], vec![8], false), // 0
+                node([0.0, 2.0, 0.0], vec![3], vec![], false),           // 1
+                shape([0.0, 0.0, 0.0], vec![], true),                    // 2 (hidden)
+                shape([0.0, 0.0, 0.0], vec![10], false),                 // 3
+                shape([0.0, 0.0, 0.0], vec![], false),                   // 4 (under collision)
+                Block::Other,                                            // 5
+                node([0.0, 0.0, 0.0], vec![4], vec![], true),            // 6 (collision)
+                shape([1.0, 0.0, 0.0], vec![], false),                   // 7
+                material(1.0),                                           // 8 (A)
+                Block::TriShapeData(TriMesh::default()),                 // 9
+                material(2.0),                                           // 10 (B)
+            ],
+            roots: vec![BlockRef(0)],
+        }
+    }
+
+    #[test]
+    fn walk_visits_visible_content_in_order_with_resolved_surfaces() {
+        let nif = synthetic_nif();
+        let mut trace = Vec::new();
+        nif.walk(|event| {
+            trace.push(match event {
+                WalkEvent::EnterNode { block, .. } => format!("enter {}", block.0),
+                WalkEvent::LeaveNode => "leave".to_string(),
+                WalkEvent::Shape {
+                    block, material, ..
+                } => format!(
+                    "shape {} gloss {}",
+                    block.0,
+                    material.expect("material resolves").glossiness
+                ),
+            });
+        });
+        assert_eq!(
+            trace,
+            [
+                "enter 0",
+                "enter 1",
+                "shape 3 gloss 2", // own material B beats inherited A
+                "leave",
+                "shape 7 gloss 1", // inherits A; hidden 2 and collision subtree 6/4 absent
+                "leave",
+            ]
+        );
+    }
+
+    #[test]
+    fn instances_compose_world_transforms_down_the_tree() {
+        let nif = synthetic_nif();
+        let instances = nif.instances();
+        assert_eq!(instances.len(), 2);
+        assert_eq!(instances[0].transform.translation, [0.0, 2.0, 1.0]); // root ∘ node 1 ∘ shape 3
+        assert_eq!(instances[1].transform.translation, [1.0, 0.0, 1.0]); // root ∘ shape 7
+        assert_eq!(instances[0].material.unwrap().glossiness, 2.0);
+        assert_eq!(instances[1].material.unwrap().glossiness, 1.0);
+    }
 }

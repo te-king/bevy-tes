@@ -23,7 +23,8 @@ use bevy::mesh::{Mesh, Mesh3d};
 use bevy::pbr::{MeshMaterial3d, StandardMaterial};
 use bevy::transform::components::Transform;
 use bevy::world_serialization::WorldAsset;
-use tes_nif::{Block, BlockRef, Nif};
+use tes_core::L1String;
+use tes_nif::{Nif, WalkEvent};
 
 use crate::TesVfs;
 use crate::convert;
@@ -76,7 +77,6 @@ fn material_key(
 
 pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>) -> SceneOutput {
     let mut builder = SceneBuilder {
-        nif,
         vfs,
         entries: Vec::new(),
         meshes: Vec::new(),
@@ -86,10 +86,50 @@ pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>)
 
     // Pass 1: walk the graph, minting labeled mesh/material assets and recording what to
     // spawn. (Labeled-asset creation needs the load context mutably, so this happens
-    // before the scene's own child context below.)
-    for &root in nif.scene_roots() {
-        builder.walk(root, 0, &[], load_context);
-    }
+    // before the scene's own child context below.) `Nif::walk` owns the traversal rules
+    // (hidden/collision skipping, property inheritance); this closure only tracks the
+    // parent entity with a stack and records entries. Slot 0 is the scene root, so an
+    // entry's slot in `spawned` below is its `entries` index + 1.
+    let mut parents = vec![0usize];
+    nif.walk(|event| match event {
+        WalkEvent::EnterNode { block, node } => {
+            builder.entries.push(SpawnEntry {
+                parent: *parents.last().expect("stack starts non-empty"),
+                transform: convert::nif_transform(&node.transform),
+                name: format!("Node{}", block.index().unwrap_or_default()),
+                surface: None,
+            });
+            parents.push(builder.entries.len());
+        }
+        WalkEvent::LeaveNode => {
+            parents.pop();
+        }
+        WalkEvent::Shape {
+            block,
+            shape,
+            mesh,
+            base_texture,
+            material,
+            alpha,
+        } => {
+            if mesh.vertices.is_empty() || mesh.triangles.is_empty() {
+                return;
+            }
+            let mesh = load_context.add_labeled_asset(
+                format!("Mesh{}", builder.meshes.len()),
+                convert::trimesh_to_mesh(mesh),
+            );
+            builder.meshes.push(mesh.clone());
+            let material = builder.material_for(base_texture, material, alpha, load_context);
+
+            builder.entries.push(SpawnEntry {
+                parent: *parents.last().expect("stack starts non-empty"),
+                transform: convert::nif_transform(&shape.transform),
+                name: format!("Shape{}", block.index().unwrap_or_default()),
+                surface: Some((mesh, material)),
+            });
+        }
+    });
 
     // Pass 2: spawn the recorded entities into a fresh world under a Z-up→Y-up root.
     let mut world = World::new();
@@ -132,7 +172,6 @@ pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>)
 }
 
 struct SceneBuilder<'a> {
-    nif: &'a Nif,
     vfs: &'a TesVfs,
     entries: Vec<SpawnEntry>,
     meshes: Vec<Handle<Mesh>>,
@@ -141,76 +180,17 @@ struct SceneBuilder<'a> {
 }
 
 impl SceneBuilder<'_> {
-    /// Depth-first walk mirroring [`Nif::instances`]'s semantics exactly: hidden and
-    /// collision subtrees are skipped, and a node's own properties take precedence over
-    /// inherited ones.
-    fn walk(
-        &mut self,
-        block: BlockRef,
-        parent: usize,
-        inherited: &[BlockRef],
-        load_context: &mut LoadContext<'_>,
-    ) {
-        match self.nif.block(block) {
-            Some(Block::Node(node)) => {
-                if node.hidden || node.collision {
-                    return;
-                }
-                let mut props = node.properties.clone();
-                props.extend_from_slice(inherited);
-
-                self.entries.push(SpawnEntry {
-                    parent,
-                    transform: convert::nif_transform(&node.transform),
-                    name: format!("Node{}", block.index().unwrap_or_default()),
-                    surface: None,
-                });
-                let slot = self.entries.len(); // this entry's index in `spawned` (root offset)
-                for &child in &node.children {
-                    self.walk(child, slot, &props, load_context);
-                }
-            }
-            Some(Block::TriShape(shape)) => {
-                if shape.hidden {
-                    return;
-                }
-                let Some(Block::TriShapeData(tri)) = self.nif.block(shape.data) else {
-                    return;
-                };
-                if tri.vertices.is_empty() || tri.triangles.is_empty() {
-                    return;
-                }
-                let mut props = shape.properties.clone();
-                props.extend_from_slice(inherited);
-
-                let mesh = load_context.add_labeled_asset(
-                    format!("Mesh{}", self.meshes.len()),
-                    convert::trimesh_to_mesh(tri),
-                );
-                self.meshes.push(mesh.clone());
-                let material = self.material_for(&props, load_context);
-
-                self.entries.push(SpawnEntry {
-                    parent,
-                    transform: convert::nif_transform(&shape.transform),
-                    name: format!("Shape{}", block.index().unwrap_or_default()),
-                    surface: Some((mesh, material)),
-                });
-            }
-            _ => {}
-        }
-    }
-
-    /// The (deduplicated) material for a shape's resolved property list, minting the
-    /// labeled asset — and the texture dependency load — on first sight.
+    /// The (deduplicated) material for a shape's resolved surface (as delivered by a
+    /// [`WalkEvent::Shape`]), minting the labeled asset — and the texture dependency
+    /// load — on first sight.
     fn material_for(
         &mut self,
-        props: &[BlockRef],
+        base_texture: Option<&L1String>,
+        material: Option<tes_nif::Material>,
+        alpha: Option<tes_nif::AlphaProperty>,
         load_context: &mut LoadContext<'_>,
     ) -> Handle<StandardMaterial> {
-        let material = self.nif.material(props);
-        let alpha = self.nif.alpha_property(props);
-        let texture = self.nif.base_texture(props).and_then(|name| {
+        let texture = base_texture.and_then(|name| {
             let name = name.decode();
             let resolved = self.vfs.resolve_texture(&name);
             if resolved.is_none() {
