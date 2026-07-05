@@ -1,7 +1,10 @@
 [package]
 name = "tes3-esm"
+description = "Parser for TES3 (Morrowind) plugin files (.esm/.esp)"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 tes-core = { workspace = true }

@@ -10,13 +10,18 @@ use tes3_esm::{Plugin, Record};
 
 const ESM_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Bloodmoon.esm");
 
-fn load_bytes() -> Vec<u8> {
-    std::fs::read(ESM_PATH).expect("Bloodmoon.esm should be readable")
+/// The file is gitignored, locally supplied game data; `None` means skip the test.
+fn load_bytes() -> Option<Vec<u8>> {
+    if !std::path::Path::new(ESM_PATH).exists() {
+        eprintln!("skipping: {ESM_PATH} not present");
+        return None;
+    }
+    Some(std::fs::read(ESM_PATH).expect("Bloodmoon.esm should be readable"))
 }
 
 #[test]
 fn header_is_v13_master() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     // Bloodmoon bumps the format version to 1.3 (Morrowind.esm is 1.2).
     assert_eq!(plugin.header.version, 1.3);
@@ -29,14 +34,14 @@ fn header_is_v13_master() {
 
 #[test]
 fn total_record_count_matches_reference() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     assert_eq!(plugin.records.len(), 10_776);
 }
 
 #[test]
 fn per_type_counts_match_reference() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
@@ -73,7 +78,7 @@ fn per_type_counts_match_reference() {
 
 #[test]
 fn no_record_is_unknown() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     let unknown: Vec<_> = plugin
         .records
@@ -88,7 +93,7 @@ fn no_record_is_unknown() {
 
 #[test]
 fn sscr_is_decoded() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     let sscr = plugin
         .records
@@ -105,7 +110,7 @@ fn sscr_is_decoded() {
 
 #[test]
 fn v13_region_weather_has_snow_and_blizzard() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     // At least one region should set the v1.3-only snow/blizzard weather chances,
     // confirming the variable-length WEAT field isn't hard-capped at the v1.2 size.

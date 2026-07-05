@@ -284,7 +284,11 @@ impl Nif {
     /// ancestor's).
     pub fn instances(&self) -> Vec<ShapeInstance<'_>> {
         let mut out = Vec::new();
-        let roots: &[i32] = if self.roots.is_empty() { &[0] } else { &self.roots };
+        let roots: &[i32] = if self.roots.is_empty() {
+            &[0]
+        } else {
+            &self.roots
+        };
         for &root in roots {
             self.collect_instances(root, &NifTransform::default(), &[], &mut out);
         }
@@ -520,8 +524,7 @@ fn parse_block(r: &mut Reader, ty: &str) -> Result<Block, NifError> {
 fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError>> {
     let block = match ty {
         // Node-like blocks all share the NiNode body in 4.0.0.2.
-        "NiNode" | "RootCollisionNode" | "AvoidNode" | "NiBSAnimationNode"
-        | "NiBSParticleNode" => {
+        "NiNode" | "RootCollisionNode" | "AvoidNode" | "NiBSAnimationNode" | "NiBSParticleNode" => {
             let av = av_object(r)?;
             let hidden = av.hidden();
             let children = r.refs()?;
@@ -562,8 +565,12 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
             r.skip(2 + 4 + 4)?; // flags + vertex mode + lighting mode
             Block::Other
         }
-        "NiZBufferProperty" | "NiSpecularProperty" | "NiWireframeProperty"
-        | "NiShadeProperty" | "NiDitherProperty" | "NiFogProperty" => {
+        "NiZBufferProperty"
+        | "NiSpecularProperty"
+        | "NiWireframeProperty"
+        | "NiShadeProperty"
+        | "NiDitherProperty"
+        | "NiFogProperty" => {
             ni_object_net(r)?;
             r.skip(2)?; // flags
             Block::Other

@@ -135,7 +135,10 @@ fn main() -> ExitCode {
         }
     }
 
-    let parts: Vec<PreparedPart> = raw_parts.into_iter().map(|p| prepare_part(p, &textures)).collect();
+    let parts: Vec<PreparedPart> = raw_parts
+        .into_iter()
+        .map(|p| prepare_part(p, &textures))
+        .collect();
 
     let (center, radius, min_y) = aggregate_bounds(&parts);
     // Parts are shifted by -center at spawn, so the lowest point lands at min_y - center.y.
@@ -169,7 +172,9 @@ fn main() -> ExitCode {
     } else {
         // Screenshot mode: a hidden window is enough to drive the render target; we capture
         // one frame and exit. `close_when_requested` is off so nothing races our AppExit.
-        let path = args.output.unwrap_or_else(|| default_screenshot_path(&args.path));
+        let path = args
+            .output
+            .unwrap_or_else(|| default_screenshot_path(&args.path));
         // Clear any stale screenshot so a failed run can't leave a misleading old image.
         let _ = std::fs::remove_file(&path);
         app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -408,7 +413,11 @@ fn load_texture(name: &str, nif_path: &Path) -> Option<Image> {
 fn resolve_texture(nif_path: &Path, tex_name: &str) -> Option<PathBuf> {
     let base = tex_name.rsplit(['\\', '/']).next().unwrap_or(tex_name);
     let stem = base.rsplit_once('.').map(|(s, _)| s).unwrap_or(base);
-    let names = [base.to_string(), format!("{stem}.dds"), format!("{stem}.tga")];
+    let names = [
+        base.to_string(),
+        format!("{stem}.dds"),
+        format!("{stem}.tga"),
+    ];
 
     // `ancestors()` includes the file itself first; skip it to start at the model's directory.
     nif_path.ancestors().skip(1).find_map(|dir| {
@@ -427,12 +436,12 @@ fn resolve_texture(nif_path: &Path, tex_name: &str) -> Option<PathBuf> {
 /// `y` (the model's lowest point), from their world-space vertex positions.
 fn aggregate_bounds(parts: &[PreparedPart]) -> (Vec3, f32, f32) {
     let positions = || {
-        parts.iter().filter_map(|p| {
-            match p.mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        parts
+            .iter()
+            .filter_map(|p| match p.mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
                 Some(bevy::render::mesh::VertexAttributeValues::Float32x3(v)) => Some(v),
                 _ => None,
-            }
-        })
+            })
     };
 
     let mut min = Vec3::splat(f32::INFINITY);

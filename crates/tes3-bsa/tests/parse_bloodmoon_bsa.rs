@@ -1,12 +1,23 @@
-//! End-to-end tests parsing the bundled `Bloodmoon.bsa` archive.
+//! End-to-end tests parsing the `Bloodmoon.bsa` archive (gitignored, locally supplied
+//! game data; the tests skip themselves when it isn't present).
+
+use std::path::Path;
 
 use tes3_bsa::Bsa;
 
 const BLOODMOON_BSA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Bloodmoon.bsa");
 
+fn open_bsa() -> Option<Bsa> {
+    if !Path::new(BLOODMOON_BSA).exists() {
+        eprintln!("skipping: {BLOODMOON_BSA} not present");
+        return None;
+    }
+    Some(Bsa::open(BLOODMOON_BSA).expect("open bsa"))
+}
+
 #[test]
 fn parses_archive() {
-    let bsa = Bsa::open(BLOODMOON_BSA).unwrap();
+    let Some(bsa) = open_bsa() else { return };
     assert_eq!(bsa.version, 0x100);
     assert_eq!(bsa.files.len(), 1_545);
 
@@ -18,7 +29,7 @@ fn parses_archive() {
 
 #[test]
 fn dds_textures_have_the_dds_magic() {
-    let bsa = Bsa::open(BLOODMOON_BSA).unwrap();
+    let Some(bsa) = open_bsa() else { return };
     let dds = bsa
         .files
         .iter()
@@ -47,12 +58,9 @@ fn parse_timing() {
     use std::hint::black_box;
     use std::time::{Duration, Instant};
 
-    let total_data: usize = Bsa::open(BLOODMOON_BSA)
-        .unwrap()
-        .files
-        .iter()
-        .map(|f| f.size as usize)
-        .sum();
+    let Some(bsa) = open_bsa() else { return };
+    let total_data: usize = bsa.files.iter().map(|f| f.size as usize).sum();
+    drop(bsa);
     const ITERATIONS: u32 = 20;
 
     let mut total = Duration::ZERO;

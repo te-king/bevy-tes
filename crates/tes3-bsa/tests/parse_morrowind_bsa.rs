@@ -1,12 +1,23 @@
-//! End-to-end tests parsing the bundled `Morrowind.bsa` archive.
+//! End-to-end tests parsing the `Morrowind.bsa` archive (gitignored, locally supplied
+//! game data; the tests skip themselves when it isn't present).
+
+use std::path::Path;
 
 use tes3_bsa::Bsa;
 
 const MORROWIND_BSA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Morrowind.bsa");
 
+fn open_bsa() -> Option<Bsa> {
+    if !Path::new(MORROWIND_BSA).exists() {
+        eprintln!("skipping: {MORROWIND_BSA} not present");
+        return None;
+    }
+    Some(Bsa::open(MORROWIND_BSA).expect("open bsa"))
+}
+
 #[test]
 fn parses_archive() {
-    let bsa = Bsa::open(MORROWIND_BSA).unwrap();
+    let Some(bsa) = open_bsa() else { return };
     assert_eq!(bsa.version, 0x100);
     assert_eq!(bsa.files.len(), 11_090);
 
@@ -22,7 +33,7 @@ fn parses_archive() {
 
 #[test]
 fn every_entry_has_a_name_and_data() {
-    let bsa = Bsa::open(MORROWIND_BSA).unwrap();
+    let Some(bsa) = open_bsa() else { return };
     for f in &bsa.files {
         assert!(!f.name.is_empty(), "every entry should have a name");
     }
@@ -32,7 +43,7 @@ fn every_entry_has_a_name_and_data() {
 
 #[test]
 fn dds_textures_have_the_dds_magic() {
-    let bsa = Bsa::open(MORROWIND_BSA).unwrap();
+    let Some(bsa) = open_bsa() else { return };
     // Spot-check that a .dds entry's bytes really are a DDS file ("DDS " magic),
     // proving the size/offset resolution lands on the right data.
     let dds = bsa
@@ -64,12 +75,9 @@ fn parse_timing() {
     use std::hint::black_box;
     use std::time::{Duration, Instant};
 
-    let total_data: usize = Bsa::open(MORROWIND_BSA)
-        .unwrap()
-        .files
-        .iter()
-        .map(|f| f.size as usize)
-        .sum();
+    let Some(bsa) = open_bsa() else { return };
+    let total_data: usize = bsa.files.iter().map(|f| f.size as usize).sum();
+    drop(bsa);
     const ITERATIONS: u32 = 20;
 
     let mut total = Duration::ZERO;
