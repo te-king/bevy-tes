@@ -23,7 +23,7 @@ impl Levc {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Levc {
         let mut out = Levc::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"DATA" => out.flags = finish(le_u32(sub.data)).unwrap_or(0),
                 b"NNAM" => out.chance_none = sub.data.first().copied().unwrap_or(0),

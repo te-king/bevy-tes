@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
+use tes_core::paths::normalize;
 use tes3_bsa::Bsa;
 
 /// A layered, case-insensitive view over a Morrowind `Data Files` directory: loose files
@@ -136,12 +137,6 @@ impl TesVfs {
     }
 }
 
-/// The shared normal form for lookups: lowercase, `/` → `\` (the BSA directory
-/// convention, and the same form `tes3_bsa`'s index uses).
-fn normalize(path: &str) -> String {
-    path.to_ascii_lowercase().replace('/', "\\")
-}
-
 /// Walk `root` recursively, mapping each file's normalized relative path to its on-disk
 /// path.
 fn index_loose_files(root: &Path) -> io::Result<HashMap<String, PathBuf>> {
@@ -187,16 +182,5 @@ impl AssetReader for TesVfsReader {
 
     async fn is_directory<'a>(&'a self, _path: &'a Path) -> Result<bool, AssetReaderError> {
         Ok(false)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize;
-
-    #[test]
-    fn normalizes_case_and_separators() {
-        assert_eq!(normalize("Textures/TX_Wood.DDS"), r"textures\tx_wood.dds");
-        assert_eq!(normalize(r"meshes\i\Shack.NIF"), r"meshes\i\shack.nif");
     }
 }

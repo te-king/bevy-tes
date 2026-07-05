@@ -6,7 +6,7 @@
 //! "moved references" (`MVRF`-led) recording objects relocated from another cell.
 
 use crate::common::{
-    Color, Subrecord, color, finish, l1, le_f32, le_i32, le_u32, parse_or_default,
+    Color, Subrecord, color, finish, l1, le_f32, le_i32, le_u32, parse_or_default, parse_struct,
 };
 use crate::shared::{AmbientLight, TravelDestination, ambient_light, travel_destination};
 use nom::IResult;
@@ -20,18 +20,12 @@ pub struct CellData {
     pub grid_y: i32,
 }
 
-fn cell_data(input: &[u8]) -> IResult<&[u8], CellData> {
-    let (input, flags) = le_u32(input)?;
-    let (input, grid_x) = le_i32(input)?;
-    let (input, grid_y) = le_i32(input)?;
-    Ok((
-        input,
-        CellData {
-            flags,
-            grid_x,
-            grid_y,
-        },
-    ))
+parse_struct! {
+    fn cell_data -> CellData {
+        flags: le_u32,
+        grid_x: le_i32,
+        grid_y: le_i32,
+    }
 }
 
 /// Position + rotation of a placed reference (`DATA`, 24 bytes; rotations in radians).
@@ -139,7 +133,7 @@ impl Cell {
         let mut pending_move: Option<MovedReference> = None;
 
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"FRMR" => {
                     flush(&mut out, &mut current, &mut pending_move);
                     current = Some(Reference {
@@ -169,7 +163,7 @@ impl Cell {
 }
 
 fn header_field(out: &mut Cell, sub: &Subrecord<'_>) {
-    match &sub.tag {
+    match &sub.tag.0 {
         b"NAME" => out.name = l1(sub.data),
         b"DATA" => out.data = parse_or_default(cell_data, sub.data),
         b"RGNN" => out.region = Some(l1(sub.data)),
@@ -182,7 +176,7 @@ fn header_field(out: &mut Cell, sub: &Subrecord<'_>) {
 
 fn moved_header_field(moved: Option<&mut MovedReference>, sub: &Subrecord<'_>) {
     let Some(moved) = moved else { return };
-    match &sub.tag {
+    match &sub.tag.0 {
         b"CNAM" => moved.dest_cell = Some(l1(sub.data)),
         b"CNDT" => {
             if let Some((x, y)) = finish(grid(sub.data)) {
@@ -201,7 +195,7 @@ fn grid(input: &[u8]) -> IResult<&[u8], (i32, i32)> {
 
 fn reference_field(reference: Option<&mut Reference>, sub: &Subrecord<'_>) {
     let Some(r) = reference else { return };
-    match &sub.tag {
+    match &sub.tag.0 {
         b"NAME" => r.object = l1(sub.data),
         b"UNAM" => r.blocked = sub.data.first().copied(),
         b"XSCL" => r.scale = finish(le_f32(sub.data)),

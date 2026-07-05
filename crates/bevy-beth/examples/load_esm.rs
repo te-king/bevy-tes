@@ -132,9 +132,7 @@ fn print_summary(path: &str, asset: &EsmAsset) {
     println!("  parsed records:   {}", asset.0.records.len());
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &asset.0.records {
-        *counts
-            .entry(String::from_utf8_lossy(&record.tag()).into_owned())
-            .or_default() += 1;
+        *counts.entry(record.tag().to_string()).or_default() += 1;
     }
     let mut by_count: Vec<_> = counts.iter().collect();
     by_count.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));

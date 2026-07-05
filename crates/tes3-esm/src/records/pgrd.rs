@@ -1,6 +1,8 @@
 //! `PGRD` — a cell path grid.
 
-use crate::common::{Subrecord, finish, l1, le_i32, le_u8, le_u16, le_u32, parse_or_default};
+use crate::common::{
+    Subrecord, finish, l1, le_i32, le_u8, le_u16, le_u32, parse_or_default, parse_struct,
+};
 use nom::multi::many0;
 use nom::{IResult, Parser};
 use tes_core::L1String;
@@ -14,20 +16,13 @@ pub struct PathGridData {
     pub point_count: u16,
 }
 
-fn path_grid_data(input: &[u8]) -> IResult<&[u8], PathGridData> {
-    let (input, grid_x) = le_i32(input)?;
-    let (input, grid_y) = le_i32(input)?;
-    let (input, flags) = le_u16(input)?;
-    let (input, point_count) = le_u16(input)?;
-    Ok((
-        input,
-        PathGridData {
-            grid_x,
-            grid_y,
-            flags,
-            point_count,
-        },
-    ))
+parse_struct! {
+    fn path_grid_data -> PathGridData {
+        grid_x: le_i32,
+        grid_y: le_i32,
+        flags: le_u16,
+        point_count: le_u16,
+    }
 }
 
 /// A single path grid node (16 bytes within `PGRP`).
@@ -75,7 +70,7 @@ impl Pgrd {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Pgrd {
         let mut out = Pgrd::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"DATA" => out.data = parse_or_default(path_grid_data, sub.data),
                 b"NAME" => out.cell = l1(sub.data),
                 b"PGRP" => {

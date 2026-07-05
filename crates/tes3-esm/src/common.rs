@@ -17,34 +17,91 @@ pub use nom::number::complete::{le_f32, le_i8, le_i16, le_i32, le_u8, le_u16, le
 pub use tes_core::bytes::{finish, fixed_l1str, l1, parse_or_default};
 pub use tes_core::math::{Color, color};
 
-/// A 4-byte record or subrecord tag, e.g. `b"TES3"` or `b"NAME"`.
-pub type Tag = [u8; 4];
+/// A 4-byte record or subrecord tag, e.g. `TES3` or `NAME`.
+///
+/// Wraps the raw bytes (`.0`, so subrecord loops can `match &sub.tag.0` against byte
+/// literals) and displays as the ASCII it holds — `TES3`, not `[84, 69, 83, 51]` — with
+/// non-printable bytes escaped.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Tag(pub [u8; 4]);
+
+impl fmt::Display for Tag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for &b in &self.0 {
+            if (0x20..0x7f).contains(&b) {
+                write!(f, "{}", b as char)?;
+            } else {
+                write!(f, "\\x{b:02x}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for Tag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Tag({self})")
+    }
+}
+
+impl From<[u8; 4]> for Tag {
+    fn from(bytes: [u8; 4]) -> Tag {
+        Tag(bytes)
+    }
+}
+
+impl PartialEq<[u8; 4]> for Tag {
+    fn eq(&self, other: &[u8; 4]) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<&[u8; 4]> for Tag {
+    fn eq(&self, other: &&[u8; 4]) -> bool {
+        self.0 == **other
+    }
+}
 
 /// Error type returned by the public parse entry points.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EsmError {
     /// I/O failure while reading a file from disk.
-    Io(std::io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
     /// The byte stream could not be parsed as a valid TES3 plugin.
+    #[error("parse error: {0}")]
     Parse(String),
 }
 
-impl fmt::Display for EsmError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EsmError::Io(e) => write!(f, "I/O error: {e}"),
-            EsmError::Parse(msg) => write!(f, "parse error: {msg}"),
+/// Generate a nom parser for a fixed-layout subrecord struct from a single
+/// `field: parser` table, so parse order and struct construction cannot drift apart
+/// (the struct definition stays hand-written — it carries the field docs):
+///
+/// ```ignore
+/// parse_struct! {
+///     fn misc_data -> MiscData {
+///         weight: le_f32,
+///         value: le_u32,
+///         flags: le_u32,
+///     }
+/// }
+/// ```
+///
+/// Parsers are any `Fn(&[u8]) -> IResult<&[u8], T>` expression (`le_u32`,
+/// `fixed_l1str(32)`, a local helper, …). Layouts with padding to skip, computed
+/// fields or loops don't fit and stay hand-written.
+macro_rules! parse_struct {
+    ($(#[$meta:meta])* fn $name:ident -> $ty:ident {
+        $( $field:ident : $parser:expr ),+ $(,)?
+    }) => {
+        $(#[$meta])*
+        fn $name(input: &[u8]) -> nom::IResult<&[u8], $ty> {
+            $( let (input, $field) = ($parser)(input)?; )+
+            Ok((input, $ty { $( $field ),+ }))
         }
-    }
+    };
 }
-
-impl std::error::Error for EsmError {}
-
-impl From<std::io::Error> for EsmError {
-    fn from(e: std::io::Error) -> Self {
-        EsmError::Io(e)
-    }
-}
+pub(crate) use parse_struct;
 
 /// Bitflags found in a record header's flags field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -93,7 +150,7 @@ pub struct Subrecord<'a> {
 /// Read a 4-byte tag.
 pub fn tag(input: &[u8]) -> IResult<&[u8], Tag> {
     let (input, bytes) = take(4usize)(input)?;
-    Ok((input, [bytes[0], bytes[1], bytes[2], bytes[3]]))
+    Ok((input, Tag([bytes[0], bytes[1], bytes[2], bytes[3]])))
 }
 
 /// Parse a record header (tag, size, unused, flags).
@@ -166,7 +223,8 @@ mod tests {
         // "TES3", size = 0x34, unused = 0, flags = 0.
         let bytes = b"TES3\x34\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
         let (_, hdr) = record_header(bytes).unwrap();
-        assert_eq!(&hdr.tag, b"TES3");
+        assert_eq!(hdr.tag, *b"TES3");
+        assert_eq!(hdr.tag.to_string(), "TES3");
         assert_eq!(hdr.size, 0x134);
         assert_eq!(hdr.flags, RecordFlags(0));
     }
@@ -177,9 +235,9 @@ mod tests {
         let bytes = b"NAME\x04\x00\x00\x00abc\x00FNAM\x03\x00\x00\x00hi\x00";
         let subs: Vec<_> = Subrecords::new(bytes).collect();
         assert_eq!(subs.len(), 2);
-        assert_eq!(&subs[0].tag, b"NAME");
+        assert_eq!(subs[0].tag, *b"NAME");
         assert_eq!(l1(subs[0].data), "abc");
-        assert_eq!(&subs[1].tag, b"FNAM");
+        assert_eq!(subs[1].tag, *b"FNAM");
         assert_eq!(l1(subs[1].data), "hi");
     }
 

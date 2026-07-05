@@ -1,8 +1,7 @@
 //! `ALCH` — a potion or other alchemy item.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default, parse_struct};
 use crate::shared::{Effect, effect};
-use nom::IResult;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -13,18 +12,12 @@ pub struct AlchemyData {
     pub flags: u32,
 }
 
-fn alchemy_data(input: &[u8]) -> IResult<&[u8], AlchemyData> {
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, flags) = le_u32(input)?;
-    Ok((
-        input,
-        AlchemyData {
-            weight,
-            value,
-            flags,
-        },
-    ))
+parse_struct! {
+    fn alchemy_data -> AlchemyData {
+        weight: le_f32,
+        value: le_u32,
+        flags: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -43,7 +36,7 @@ impl Alch {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Alch {
         let mut out = Alch::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = Some(l1(sub.data)),
                 b"TEXT" => out.icon = Some(l1(sub.data)),

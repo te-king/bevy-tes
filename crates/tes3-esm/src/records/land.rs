@@ -52,7 +52,7 @@ impl Land {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Land {
         let mut out = Land::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"INTV" => {
                     if let Some((x, y)) = finish(coords(sub.data)) {
                         out.grid_x = x;

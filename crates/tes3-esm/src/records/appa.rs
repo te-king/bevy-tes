@@ -1,7 +1,6 @@
 //! `APPA` — an alchemy apparatus.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default, parse_struct};
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -13,20 +12,13 @@ pub struct ApparatusData {
     pub value: u32,
 }
 
-fn apparatus_data(input: &[u8]) -> IResult<&[u8], ApparatusData> {
-    let (input, kind) = le_u32(input)?;
-    let (input, quality) = le_f32(input)?;
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    Ok((
-        input,
-        ApparatusData {
-            kind,
-            quality,
-            weight,
-            value,
-        },
-    ))
+parse_struct! {
+    fn apparatus_data -> ApparatusData {
+        kind: le_u32,
+        quality: le_f32,
+        weight: le_f32,
+        value: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -43,7 +35,7 @@ impl Appa {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Appa {
         let mut out = Appa::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = Some(l1(sub.data)),
                 b"FNAM" => out.name = Some(l1(sub.data)),

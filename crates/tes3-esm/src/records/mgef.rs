@@ -1,7 +1,6 @@
 //! `MGEF` — a magic effect.
 
-use crate::common::{Subrecord, finish, l1, le_f32, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{Subrecord, finish, l1, le_f32, le_u32, parse_or_default, parse_struct};
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -19,30 +18,18 @@ pub struct MagicEffectData {
     pub size_cap: f32,
 }
 
-fn magic_effect_data(input: &[u8]) -> IResult<&[u8], MagicEffectData> {
-    let (input, school) = le_u32(input)?;
-    let (input, base_cost) = le_f32(input)?;
-    let (input, flags) = le_u32(input)?;
-    let (input, red) = le_u32(input)?;
-    let (input, green) = le_u32(input)?;
-    let (input, blue) = le_u32(input)?;
-    let (input, speed_x) = le_f32(input)?;
-    let (input, size_x) = le_f32(input)?;
-    let (input, size_cap) = le_f32(input)?;
-    Ok((
-        input,
-        MagicEffectData {
-            school,
-            base_cost,
-            flags,
-            red,
-            green,
-            blue,
-            speed_x,
-            size_x,
-            size_cap,
-        },
-    ))
+parse_struct! {
+    fn magic_effect_data -> MagicEffectData {
+        school: le_u32,
+        base_cost: le_f32,
+        flags: le_u32,
+        red: le_u32,
+        green: le_u32,
+        blue: le_u32,
+        speed_x: le_f32,
+        size_x: le_f32,
+        size_cap: le_f32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -67,7 +54,7 @@ impl Mgef {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Mgef {
         let mut out = Mgef::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"INDX" => out.index = finish(le_u32(sub.data)).unwrap_or(0),
                 b"MEDT" => out.data = parse_or_default(magic_effect_data, sub.data),
                 b"ITEX" => out.icon = Some(l1(sub.data)),

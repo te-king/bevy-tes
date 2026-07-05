@@ -89,7 +89,7 @@ impl Fact {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Fact {
         let mut out = Fact::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"FNAM" => out.name = l1(sub.data),
                 b"RNAM" => out.rank_names.push(l1(sub.data)),

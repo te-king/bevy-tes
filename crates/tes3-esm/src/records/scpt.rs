@@ -1,7 +1,6 @@
 //! `SCPT` — a script.
 
-use crate::common::{Subrecord, fixed_l1str, l1, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{Subrecord, fixed_l1str, l1, le_u32, parse_or_default, parse_struct};
 use tes_core::L1String;
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -14,24 +13,15 @@ pub struct ScriptHeader {
     pub local_var_size: u32,
 }
 
-fn script_header(input: &[u8]) -> IResult<&[u8], ScriptHeader> {
-    let (input, name) = fixed_l1str(32)(input)?;
-    let (input, num_shorts) = le_u32(input)?;
-    let (input, num_longs) = le_u32(input)?;
-    let (input, num_floats) = le_u32(input)?;
-    let (input, script_data_size) = le_u32(input)?;
-    let (input, local_var_size) = le_u32(input)?;
-    Ok((
-        input,
-        ScriptHeader {
-            name,
-            num_shorts,
-            num_longs,
-            num_floats,
-            script_data_size,
-            local_var_size,
-        },
-    ))
+parse_struct! {
+    fn script_header -> ScriptHeader {
+        name: fixed_l1str(32),
+        num_shorts: le_u32,
+        num_longs: le_u32,
+        num_floats: le_u32,
+        script_data_size: le_u32,
+        local_var_size: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -49,7 +39,7 @@ impl Scpt {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Scpt {
         let mut out = Scpt::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"SCHD" => out.header = parse_or_default(script_header, sub.data),
                 b"SCVR" => {
                     out.variables = sub

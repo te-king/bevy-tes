@@ -78,7 +78,7 @@ impl Info {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Info {
         let mut out = Info::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"INAM" => out.id = l1(sub.data),
                 b"PNAM" => out.prev = l1(sub.data),
                 b"NNAM" => out.next = l1(sub.data),

@@ -56,7 +56,7 @@ impl Clas {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Clas {
         let mut out = Clas::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"FNAM" => out.name = l1(sub.data),
                 b"CLDT" => out.data = parse_or_default(class_data, sub.data),

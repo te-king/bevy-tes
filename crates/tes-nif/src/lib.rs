@@ -42,36 +42,20 @@
 //! }
 //! ```
 
-use std::fmt;
 use tes_core::L1String;
 
 /// The NIF version Morrowind/Tribunal/Bloodmoon use: `4.0.0.2`.
 pub const VERSION_TES3: u32 = 0x0400_0002;
 
 /// Error returned when reading or parsing a NIF file.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum NifError {
     /// I/O failure while reading the file from disk.
-    Io(std::io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
     /// The byte stream could not be parsed as a supported NIF.
+    #[error("parse error: {0}")]
     Parse(String),
-}
-
-impl fmt::Display for NifError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            NifError::Io(e) => write!(f, "I/O error: {e}"),
-            NifError::Parse(msg) => write!(f, "parse error: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for NifError {}
-
-impl From<std::io::Error> for NifError {
-    fn from(e: std::io::Error) -> Self {
-        NifError::Io(e)
-    }
 }
 
 /// The NIF header (version 4.0.0.2 layout): a newline-terminated identifier string, the
