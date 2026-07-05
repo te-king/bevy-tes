@@ -16,8 +16,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Bevy's Linux native deps (windowing/audio sys crates need these to compile).
+      # wayland/xkbcommon are required by winit, which the `render` feature pulls in.
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
         with:
