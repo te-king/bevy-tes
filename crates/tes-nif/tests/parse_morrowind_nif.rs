@@ -35,11 +35,11 @@ fn parses_a_static_mesh_with_geometry() {
         .iter()
         .filter(|f| f.name.decode().to_ascii_lowercase().ends_with(".nif"))
         .filter_map(|f| Nif::parse(bsa.bytes(f)).ok())
-        .find(|nif| nif.tri_shapes().next().is_some())
+        .find(|nif| !nif.instances().is_empty())
         .expect("at least one .nif parses with geometry");
 
     assert_eq!(parsed.header.version, VERSION_TES3);
-    let mesh = parsed.tri_shapes().next().unwrap().mesh;
+    let mesh = parsed.instances().into_iter().next().unwrap().mesh;
     assert!(!mesh.vertices.is_empty(), "mesh has vertices");
     assert!(!mesh.triangles.is_empty(), "mesh has triangles");
     // Every triangle index must be in range for the vertex buffer.
@@ -63,7 +63,7 @@ fn most_static_meshes_parse() {
         }
         total += 1;
         if let Ok(nif) = Nif::parse(bsa.bytes(f))
-            && nif.tri_shapes().next().is_some()
+            && !nif.instances().is_empty()
         {
             with_geometry += 1;
         }

@@ -12,8 +12,10 @@
 //! This crate decodes the **static-mesh block graph** — the blocks needed to get textured
 //! triangle geometry out of a model: [`Block::Node`] (`NiNode` and friends),
 //! [`Block::TriShape`] (`NiTriShape`), [`Block::TriShapeData`] (`NiTriShapeData`, the actual
-//! mesh), and the base-texture chain [`Block::TexturingProperty`] → [`Block::SourceTexture`]
-//! (which retains the diffuse texture filename). Other property / extra-data blocks are
+//! mesh), the base-texture chain [`Block::TexturingProperty`] → [`Block::SourceTexture`]
+//! (which retains the diffuse texture filename), and [`Block::MaterialProperty`] (surface
+//! colours). [`Nif::instances`] walks the scene graph from its roots, composing transforms
+//! and resolving each shape's texture and material. Other property / extra-data blocks are
 //! decoded only far enough to walk past them (kept as [`Block::Other`] so block indices —
 //! which references rely on — stay aligned). Block types outside this set (particle systems,
 //! controllers, …) cause [`Nif::parse`] to fail with [`NifError::Parse`] naming the
@@ -23,7 +25,7 @@
 //! let bytes = std::fs::read("model.nif").unwrap();
 //! let nif = tes_nif::Nif::parse(&bytes).unwrap();
 //! assert_eq!(nif.header.version, tes_nif::VERSION_TES3);
-//! for shape in nif.tri_shapes() {
+//! for shape in nif.instances() {
 //!     let mesh = shape.mesh;
 //!     println!("{} vertices, {} triangles", mesh.vertices.len(), mesh.triangles.len());
 //!     if let Some(tex) = shape.base_texture {
@@ -121,6 +123,55 @@ impl NifTransform {
             m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
         ]
     }
+
+    /// Compose this (parent) transform with a `child`, yielding the child's transform in this
+    /// transform's frame: `self ∘ child`. The result applied to a point equals
+    /// `self.apply_point(child.apply_point(p))` (exact because the scale is uniform).
+    pub fn compose(&self, child: &NifTransform) -> NifTransform {
+        NifTransform {
+            translation: self.apply_point(child.translation),
+            rotation: mat3_mul(&self.rotation, &child.rotation),
+            scale: self.scale * child.scale,
+        }
+    }
+}
+
+/// Row-major 3×3 matrix product `a * b`.
+fn mat3_mul(a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    let mut m = [[0.0f32; 3]; 3];
+    for (i, row) in m.iter_mut().enumerate() {
+        for (j, cell) in row.iter_mut().enumerate() {
+            *cell = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+        }
+    }
+    m
+}
+
+/// Surface material decoded from a `NiMaterialProperty`: the fixed-function colours and
+/// factors Morrowind authored per shape. Colours are RGB in the game's (sRGB-ish) space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Material {
+    pub ambient: [f32; 3],
+    pub diffuse: [f32; 3],
+    pub specular: [f32; 3],
+    pub emissive: [f32; 3],
+    /// Specular exponent (0–128 range in practice).
+    pub glossiness: f32,
+    /// Opacity, `0.0`–`1.0`. Below 1 the shape is meant to be drawn translucent.
+    pub alpha: f32,
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Material {
+            ambient: [1.0; 3],
+            diffuse: [1.0; 3],
+            specular: [0.0; 3],
+            emissive: [0.0; 3],
+            glossiness: 0.0,
+            alpha: 1.0,
+        }
+    }
 }
 
 /// Triangle mesh geometry decoded from a `NiTriShapeData` block.
@@ -140,19 +191,29 @@ pub struct TriMesh {
 /// [`Block::Other`] purely to preserve that indexing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
-    /// `NiNode` (and node-like blocks): a transform plus child block references.
+    /// `NiNode` (and node-like blocks): a transform, its child block references, its attached
+    /// property references (inherited by descendants), and traversal flags.
     Node {
         transform: NifTransform,
         children: Vec<i32>,
+        /// Block indices of attached property blocks, inherited by descendant shapes.
+        properties: Vec<i32>,
+        /// `NiAVObject` "hidden" flag (bit 0): the node and its subtree should not be drawn.
+        hidden: bool,
+        /// `true` for a `RootCollisionNode`: its subtree is collision geometry, not visuals.
+        collision: bool,
     },
-    /// `NiTriShape`: a transform, a reference to its [`Block::TriShapeData`], and the block
-    /// references of its attached properties (used to resolve its texture and material).
+    /// `NiTriShape`: a transform, a reference to its [`Block::TriShapeData`], the block
+    /// references of its attached properties (used to resolve its texture and material), and
+    /// the "hidden" flag.
     TriShape {
         transform: NifTransform,
         /// Block index of the geometry data, or `-1` for none.
         data: i32,
         /// Block indices of attached property blocks (texturing, material, alpha, …).
         properties: Vec<i32>,
+        /// `NiAVObject` "hidden" flag (bit 0): the shape should not be drawn.
+        hidden: bool,
     },
     /// `NiTriShapeData`: the actual triangle geometry.
     TriShapeData(TriMesh),
@@ -160,20 +221,26 @@ pub enum Block {
     /// i.e. the [`Block::SourceTexture`] providing the diffuse map. `-1` when that slot is
     /// unused.
     TexturingProperty { base_texture: i32 },
+    /// `NiMaterialProperty`: the decoded surface [`Material`].
+    MaterialProperty(Material),
     /// `NiSourceTexture`: an external texture reference, keeping the filename it names
     /// (e.g. `Tx_BeerStein.dds`). Empty for the internal-pixel-data case, which this crate
     /// doesn't decode.
     SourceTexture { file_name: L1String },
-    /// A block parsed past but not represented (material, alpha, extra data, …).
+    /// A block parsed past but not represented (alpha, extra data, …).
     Other,
 }
 
-/// A parsed NIF file: its [`NifHeader`] and the decoded [`Block`] graph.
+/// A parsed NIF file: its [`NifHeader`], the decoded [`Block`] graph, and the root block
+/// references the scene is traversed from.
 #[derive(Debug)]
 pub struct Nif {
     pub header: NifHeader,
     /// Decoded blocks, one per block in the file, in file order.
     pub blocks: Vec<Block>,
+    /// Root block indices from the file footer; scene traversal starts here. Empty when the
+    /// footer is absent, in which case [`Nif::instances`] falls back to block 0.
+    pub roots: Vec<i32>,
 }
 
 impl Nif {
@@ -199,39 +266,87 @@ impl Nif {
             })?;
             blocks.push(block);
         }
-        // A footer (root count + root refs) follows the blocks; it's not needed for
-        // geometry, so we simply ignore whatever trails the last block.
+        // The footer (root count + root refs) follows the blocks. It's optional for us: read
+        // it if present, else traversal falls back to block 0.
+        let roots = r.refs().unwrap_or_default();
 
-        Ok(Nif { header, blocks })
-    }
-
-    /// Iterate every `NiTriShape` in the file as a [`Shape`] — its geometry paired with the
-    /// base texture it resolves to. Only the shape's own local transform is reported;
-    /// ancestor `NiNode` transforms are not composed in.
-    pub fn tri_shapes(&self) -> impl Iterator<Item = Shape<'_>> {
-        self.blocks.iter().filter_map(|b| match b {
-            Block::TriShape {
-                transform,
-                data,
-                properties,
-            } => {
-                let mesh = match self.blocks.get(*data as usize)? {
-                    Block::TriShapeData(m) => m,
-                    _ => return None,
-                };
-                Some(Shape {
-                    transform: *transform,
-                    mesh,
-                    base_texture: self.base_texture(properties),
-                })
-            }
-            _ => None,
+        Ok(Nif {
+            header,
+            blocks,
+            roots,
         })
     }
 
-    /// Resolve a shape's base-colour texture filename by walking its property references to
-    /// the first [`Block::TexturingProperty`], then following that to its
-    /// [`Block::SourceTexture`]. `None` when the shape has no external base texture.
+    /// Walk the scene graph from the roots, yielding a [`ShapeInstance`] for every drawable
+    /// `NiTriShape` with its **world** transform composed down the tree. Hidden nodes/shapes
+    /// and `RootCollisionNode` subtrees are skipped, and each shape's texture and material are
+    /// resolved with property inheritance (the shape's own properties take precedence over an
+    /// ancestor's).
+    pub fn instances(&self) -> Vec<ShapeInstance<'_>> {
+        let mut out = Vec::new();
+        let roots: &[i32] = if self.roots.is_empty() { &[0] } else { &self.roots };
+        for &root in roots {
+            self.collect_instances(root, &NifTransform::default(), &[], &mut out);
+        }
+        out
+    }
+
+    /// Depth-first traversal helper. `world` is the accumulated transform above `block`;
+    /// `inherited` is the ancestors' property references, nearest first.
+    fn collect_instances<'a>(
+        &'a self,
+        block: i32,
+        world: &NifTransform,
+        inherited: &[i32],
+        out: &mut Vec<ShapeInstance<'a>>,
+    ) {
+        match self.blocks.get(block as usize) {
+            Some(Block::Node {
+                transform,
+                children,
+                properties,
+                hidden,
+                collision,
+            }) => {
+                if *hidden || *collision {
+                    return;
+                }
+                let node_world = world.compose(transform);
+                // A node's own properties sit nearer to descendants than its ancestors'.
+                let mut props = properties.clone();
+                props.extend_from_slice(inherited);
+                for &child in children {
+                    self.collect_instances(child, &node_world, &props, out);
+                }
+            }
+            Some(Block::TriShape {
+                transform,
+                data,
+                properties,
+                hidden,
+            }) => {
+                if *hidden {
+                    return;
+                }
+                let Some(Block::TriShapeData(mesh)) = self.blocks.get(*data as usize) else {
+                    return;
+                };
+                let mut props = properties.clone();
+                props.extend_from_slice(inherited);
+                out.push(ShapeInstance {
+                    transform: world.compose(transform),
+                    mesh,
+                    base_texture: self.base_texture(&props),
+                    material: self.material(&props),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    /// Resolve a shape's base-colour texture filename by walking its (inheritance-ordered)
+    /// property references to the first [`Block::TexturingProperty`], then following that to
+    /// its [`Block::SourceTexture`]. `None` when no external base texture applies.
     fn base_texture(&self, properties: &[i32]) -> Option<&L1String> {
         for &p in properties {
             if let Some(Block::TexturingProperty { base_texture }) = self.blocks.get(p as usize)
@@ -244,18 +359,31 @@ impl Nif {
         }
         None
     }
+
+    /// Resolve a shape's [`Material`] from the first [`Block::MaterialProperty`] in its
+    /// (inheritance-ordered) property references. `None` when none applies.
+    fn material(&self, properties: &[i32]) -> Option<Material> {
+        for &p in properties {
+            if let Some(Block::MaterialProperty(m)) = self.blocks.get(p as usize) {
+                return Some(*m);
+            }
+        }
+        None
+    }
 }
 
-/// A `NiTriShape` resolved to its geometry and base texture, produced by [`Nif::tri_shapes`].
+/// A drawable `NiTriShape` located in the scene, produced by [`Nif::instances`].
 #[derive(Debug, Clone, Copy)]
-pub struct Shape<'a> {
-    /// The shape's own local transform; ancestor `NiNode` transforms are not composed in.
+pub struct ShapeInstance<'a> {
+    /// The shape's **world** transform, composed from the root down the scene graph.
     pub transform: NifTransform,
-    /// The triangle geometry from the shape's `NiTriShapeData`.
+    /// The triangle geometry from the shape's `NiTriShapeData`, in the shape's local space.
     pub mesh: &'a TriMesh,
-    /// Base-colour texture filename (first `NiTexturingProperty` slot), if any — e.g.
-    /// `Tx_BeerStein.dds`. Resolve it against a texture directory or `Morrowind.bsa`.
+    /// Base-colour texture filename (first inherited `NiTexturingProperty` slot), if any —
+    /// e.g. `Tx_BeerStein.dds`. Resolve it against a texture directory or `Morrowind.bsa`.
     pub base_texture: Option<&'a L1String>,
+    /// Surface material (first inherited `NiMaterialProperty`), if any.
+    pub material: Option<Material>,
 }
 
 /// Parse the version-4.0.0.2 header: identifier line (terminated by `\n`), then the
@@ -394,22 +522,28 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
         // Node-like blocks all share the NiNode body in 4.0.0.2.
         "NiNode" | "RootCollisionNode" | "AvoidNode" | "NiBSAnimationNode"
         | "NiBSParticleNode" => {
-            let (transform, _props) = av_object(r)?;
+            let av = av_object(r)?;
+            let hidden = av.hidden();
             let children = r.refs()?;
             let _effects = r.refs()?;
             Block::Node {
-                transform,
+                transform: av.transform,
                 children,
+                properties: av.properties,
+                hidden,
+                collision: ty == "RootCollisionNode",
             }
         }
         "NiTriShape" => {
-            let (transform, properties) = av_object(r)?;
+            let av = av_object(r)?;
+            let hidden = av.hidden();
             let data = r.i32()?;
             let _skin = r.i32()?;
             Block::TriShape {
-                transform,
+                transform: av.transform,
                 data,
-                properties,
+                properties: av.properties,
+                hidden,
             }
         }
         "NiTriShapeData" => Block::TriShapeData(tri_shape_data(r)?),
@@ -417,12 +551,7 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
         "NiTexturingProperty" => Block::TexturingProperty {
             base_texture: texturing_property(r)?,
         },
-        "NiMaterialProperty" => {
-            ni_object_net(r)?;
-            r.skip(2)?; // flags
-            r.skip(4 * 4 * 3 + 4 * 2)?; // 4 colors (rgb) + glossiness + alpha
-            Block::Other
-        }
+        "NiMaterialProperty" => Block::MaterialProperty(material_property(r)?),
         "NiAlphaProperty" => {
             ni_object_net(r)?;
             r.skip(2 + 1)?; // flags + threshold
@@ -471,11 +600,26 @@ fn ni_object_net(r: &mut Reader) -> RResult<L1String> {
     Ok(name)
 }
 
+/// The decoded common `NiAVObject` fields: local transform, attached property refs, and the
+/// flags word (bit 0 = hidden).
+struct AvObject {
+    transform: NifTransform,
+    properties: Vec<i32>,
+    flags: u16,
+}
+
+impl AvObject {
+    /// The `NiAVObject` "hidden" flag (bit 0): the object and its subtree are not drawn.
+    fn hidden(&self) -> bool {
+        self.flags & 0x0001 != 0
+    }
+}
+
 /// `NiAVObject`: `NiObjectNET` + flags + local transform + velocity + property refs +
-/// optional bounding box. Returns the local transform and the property references.
-fn av_object(r: &mut Reader) -> RResult<(NifTransform, Vec<i32>)> {
+/// optional bounding box.
+fn av_object(r: &mut Reader) -> RResult<AvObject> {
     ni_object_net(r)?;
-    r.u16()?; // flags
+    let flags = r.u16()?;
     let translation = r.vec3()?;
     let rotation = [r.vec3()?, r.vec3()?, r.vec3()?];
     let scale = r.f32()?;
@@ -485,14 +629,15 @@ fn av_object(r: &mut Reader) -> RResult<(NifTransform, Vec<i32>)> {
         // bounding box: unknown u32 + center vec3 + 3x3 axes + 3 extents
         r.skip(4 + 12 + 36 + 12)?;
     }
-    Ok((
-        NifTransform {
+    Ok(AvObject {
+        transform: NifTransform {
             translation,
             rotation,
             scale,
         },
         properties,
-    ))
+        flags,
+    })
 }
 
 /// `NiTriShapeData` (the 4.0.0.2 `NiGeometryData` layout, no inherited name field).
@@ -553,6 +698,26 @@ fn tri_shape_data(r: &mut Reader) -> RResult<TriMesh> {
         normals,
         uvs,
         triangles,
+    })
+}
+
+/// `NiMaterialProperty`: `NiObjectNET` + flags, then the four colours, glossiness and alpha.
+fn material_property(r: &mut Reader) -> RResult<Material> {
+    ni_object_net(r)?;
+    r.u16()?; // flags
+    let ambient = r.vec3()?;
+    let diffuse = r.vec3()?;
+    let specular = r.vec3()?;
+    let emissive = r.vec3()?;
+    let glossiness = r.f32()?;
+    let alpha = r.f32()?;
+    Ok(Material {
+        ambient,
+        diffuse,
+        specular,
+        emissive,
+        glossiness,
+        alpha,
     })
 }
 
@@ -642,5 +807,33 @@ mod tests {
             scale: 2.0,
         };
         assert_eq!(t.apply_point([1.0, 1.0, 1.0]), [3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn compose_matches_nested_application() {
+        // A parent that rotates +90° about Z, scales 2×, and translates; a child that rotates
+        // +90° about X and translates. Composing then applying must equal applying in turn.
+        let parent = NifTransform {
+            translation: [10.0, 0.0, -5.0],
+            rotation: [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            scale: 2.0,
+        };
+        let child = NifTransform {
+            translation: [1.0, 2.0, 3.0],
+            rotation: [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+            scale: 0.5,
+        };
+        let composed = parent.compose(&child);
+        for p in [[1.0, 0.0, 0.0], [0.3, -2.0, 4.0], [-1.0, 5.0, 2.5]] {
+            let nested = parent.apply_point(child.apply_point(p));
+            let direct = composed.apply_point(p);
+            for k in 0..3 {
+                assert!(
+                    (nested[k] - direct[k]).abs() < 1e-4,
+                    "axis {k}: {nested:?} vs {direct:?}"
+                );
+            }
+        }
+        assert!((composed.scale - 1.0).abs() < 1e-6);
     }
 }

@@ -69,7 +69,7 @@ fn beer_barrel_has_geometry() {
         return;
     };
     let nif = Nif::parse(&bytes).expect("parse beer barrel");
-    let shapes: Vec<_> = nif.tri_shapes().collect();
+    let shapes = nif.instances();
     assert_eq!(shapes.len(), 1, "beer barrel has one tri shape");
     let mesh = shapes[0].mesh;
     assert_eq!(mesh.vertices.len(), 398);
@@ -86,7 +86,7 @@ fn beer_barrel_references_its_texture() {
         return;
     };
     let nif = Nif::parse(&bytes).expect("parse beer barrel");
-    let shape = nif.tri_shapes().next().expect("one tri shape");
+    let shape = nif.instances().into_iter().next().expect("one tri shape");
     let texture = shape
         .base_texture
         .expect("beer barrel resolves a base texture")
@@ -100,12 +100,37 @@ fn cursor_has_geometry() {
         return;
     };
     let nif = Nif::parse(&bytes).expect("parse cursor");
-    let shapes: Vec<_> = nif.tri_shapes().collect();
+    let shapes = nif.instances();
     assert_eq!(shapes.len(), 1, "cursor has one tri shape");
     let mesh = shapes[0].mesh;
     assert_eq!(mesh.vertices.len(), 4);
     assert_eq!(mesh.triangles.len(), 2);
     assert_eq!(mesh.normals.len(), 4);
+}
+
+#[test]
+fn shack_has_multiple_textured_parts() {
+    // A multi-part static: several NiTriShapes under a NiNode root, each with its own
+    // texture. This exercises scene traversal (composed transforms) and per-shape texture
+    // resolution — the reason `instances()` replaced the flat shape list.
+    let Some(bytes) = read_fixture("i/In_De_Shack_01.nif") else {
+        return;
+    };
+    let nif = Nif::parse(&bytes).expect("parse shack");
+    let shapes = nif.instances();
+    assert!(
+        shapes.len() > 1,
+        "expected several parts, got {}",
+        shapes.len()
+    );
+    let distinct: std::collections::BTreeSet<_> = shapes
+        .iter()
+        .filter_map(|s| s.base_texture.map(|t| t.decode().into_owned()))
+        .collect();
+    assert!(
+        distinct.len() > 1,
+        "expected several distinct textures, got {distinct:?}"
+    );
 }
 
 #[test]
