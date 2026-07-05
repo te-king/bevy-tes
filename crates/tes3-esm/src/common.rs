@@ -88,14 +88,15 @@ pub enum EsmError {
 /// ```
 ///
 /// Parsers are any `Fn(&[u8]) -> IResult<&[u8], T>` expression (`le_u32`,
-/// `fixed_l1str(32)`, a local helper, …). Layouts with padding to skip, computed
+/// `fixed_l1str(32)`, a local helper, …). The `fn` takes an optional visibility
+/// (`pub fn` for the parsers `shared` exports). Layouts with padding to skip, computed
 /// fields or loops don't fit and stay hand-written.
 macro_rules! parse_struct {
-    ($(#[$meta:meta])* fn $name:ident -> $ty:ident {
+    ($(#[$meta:meta])* $vis:vis fn $name:ident -> $ty:ident {
         $( $field:ident : $parser:expr ),+ $(,)?
     }) => {
         $(#[$meta])*
-        fn $name(input: &[u8]) -> nom::IResult<&[u8], $ty> {
+        $vis fn $name(input: &[u8]) -> nom::IResult<&[u8], $ty> {
             $( let (input, $field) = ($parser)(input)?; )+
             Ok((input, $ty { $( $field ),+ }))
         }

@@ -5,7 +5,7 @@
 //! String-bearing types own their text as [`L1String`](crate::L1String) (decoded on
 //! demand); purely numeric types ([`Effect`], [`AiData`], [`AmbientLight`]) are `Copy`.
 
-use super::common::{Color, color, fixed_l1str};
+use super::common::{Color, color, fixed_l1str, parse_struct};
 use nom::IResult;
 use nom::number::complete::{le_f32, le_i8, le_i32, le_u8, le_u16, le_u32};
 use tes_core::L1String;
@@ -26,28 +26,17 @@ pub struct Effect {
     pub magnitude_max: u32,
 }
 
-pub fn effect(input: &[u8]) -> IResult<&[u8], Effect> {
-    let (input, effect_index) = le_u16(input)?;
-    let (input, skill) = le_i8(input)?;
-    let (input, attribute) = le_i8(input)?;
-    let (input, range) = le_u32(input)?;
-    let (input, area) = le_u32(input)?;
-    let (input, duration) = le_u32(input)?;
-    let (input, magnitude_min) = le_u32(input)?;
-    let (input, magnitude_max) = le_u32(input)?;
-    Ok((
-        input,
-        Effect {
-            effect_index,
-            skill,
-            attribute,
-            range,
-            area,
-            duration,
-            magnitude_min,
-            magnitude_max,
-        },
-    ))
+parse_struct! {
+    pub fn effect -> Effect {
+        effect_index: le_u16,
+        skill: le_i8,
+        attribute: le_i8,
+        range: le_u32,
+        area: le_u32,
+        duration: le_u32,
+        magnitude_min: le_u32,
+        magnitude_max: le_u32,
+    }
 }
 
 /// A carried/contained inventory entry (`NPCO`, 36 bytes). Shared by CONT, CREA, NPC_.
@@ -59,10 +48,11 @@ pub struct InventoryItem {
     pub object: L1String,
 }
 
-pub fn inventory_item(input: &[u8]) -> IResult<&[u8], InventoryItem> {
-    let (input, count) = le_i32(input)?;
-    let (input, object) = fixed_l1str(32)(input)?;
-    Ok((input, InventoryItem { count, object }))
+parse_struct! {
+    pub fn inventory_item -> InventoryItem {
+        count: le_i32,
+        object: fixed_l1str(32),
+    }
 }
 
 /// AI behavior data (`AIDT`, 12 bytes). Shared by CREA and NPC_.
@@ -252,18 +242,11 @@ pub struct AmbientLight {
     pub fog_density: f32,
 }
 
-pub fn ambient_light(input: &[u8]) -> IResult<&[u8], AmbientLight> {
-    let (input, ambient) = color(input)?;
-    let (input, sunlight) = color(input)?;
-    let (input, fog) = color(input)?;
-    let (input, fog_density) = le_f32(input)?;
-    Ok((
-        input,
-        AmbientLight {
-            ambient,
-            sunlight,
-            fog,
-            fog_density,
-        },
-    ))
+parse_struct! {
+    pub fn ambient_light -> AmbientLight {
+        ambient: color,
+        sunlight: color,
+        fog: color,
+        fog_density: le_f32,
+    }
 }

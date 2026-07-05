@@ -4,58 +4,16 @@
 //! Skips when the (gitignored, locally supplied) game data is absent.
 #![cfg(feature = "scene")]
 
-use std::time::Duration;
-
-use bevy::app::App;
-use bevy::asset::{AssetApp, AssetPlugin, AssetServer, Assets, Handle, LoadState};
-use bevy::image::{CompressedImageFormats, Image, ImageAddressMode, ImageLoader, ImageSampler};
+use bevy::asset::{AssetServer, Assets, Handle, LoadState};
+use bevy::image::{Image, ImageAddressMode, ImageSampler};
 use bevy::mesh::Mesh;
 use bevy::pbr::StandardMaterial;
-use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
 use bevy::world_serialization::WorldAsset;
 
-use bevy_beth::{BethPlugin, NifAsset};
+use bevy_beth::NifAsset;
 
-const DATA_ROOT: &str = "../../data";
-
-/// A headless app with just enough asset machinery for scene-emitting NIF loads: the
-/// plugins register the `tes://` source and the NIF loader; the manual registrations
-/// stand in for the render plugins that would normally own `Image`/`Mesh`/material
-/// assets.
-fn headless_scene_app() -> App {
-    IoTaskPool::get_or_init(Default::default);
-    AsyncComputeTaskPool::get_or_init(Default::default);
-    ComputeTaskPool::get_or_init(Default::default);
-
-    let mut app = App::new();
-    app.add_plugins((
-        BethPlugin::new(DATA_ROOT),
-        AssetPlugin {
-            file_path: DATA_ROOT.to_string(),
-            ..Default::default()
-        },
-    ));
-    app.init_asset::<Image>()
-        .init_asset::<Mesh>()
-        .init_asset::<StandardMaterial>()
-        .init_asset::<WorldAsset>()
-        .register_asset_loader(ImageLoader::new(CompressedImageFormats::BC));
-    app.finish();
-    app
-}
-
-fn pump_until_loaded<A: bevy::asset::Asset>(app: &mut App, handle: &Handle<A>) -> LoadState {
-    let mut state = LoadState::NotLoaded;
-    for _ in 0..2000 {
-        app.update();
-        state = app.world().resource::<AssetServer>().load_state(handle);
-        if matches!(state, LoadState::Loaded | LoadState::Failed(_)) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    state
-}
+mod common;
+use common::{app_with_assets, pump_until_loaded};
 
 #[test]
 fn nif_load_emits_scene_meshes_and_textured_materials() {
@@ -63,7 +21,7 @@ fn nif_load_emits_scene_meshes_and_textured_materials() {
         return;
     }
 
-    let mut app = headless_scene_app();
+    let mut app = app_with_assets();
     let handle: Handle<NifAsset> = app
         .world()
         .resource::<AssetServer>()
@@ -135,7 +93,7 @@ fn foliage_gets_alpha_masked_materials() {
         return;
     }
 
-    let mut app = headless_scene_app();
+    let mut app = app_with_assets();
     let handle: Handle<NifAsset> = app
         .world()
         .resource::<AssetServer>()
@@ -173,7 +131,7 @@ fn scene_labels_are_addressable_directly() {
         return;
     }
 
-    let mut app = headless_scene_app();
+    let mut app = app_with_assets();
     // Loading the labeled sub-asset directly — as WorldAssetRoot spawning would.
     let scene: Handle<WorldAsset> = app
         .world()
