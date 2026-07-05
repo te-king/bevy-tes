@@ -1,53 +1,87 @@
 //! Bevy integration for Bethesda Creation Engine (TES3 / Morrowind) data files.
 //!
-//! This crate adds [`BethPlugin`], which registers Bevy [`AssetLoader`]s backed by the
-//! format parsers ([`tes3_esm`], [`tes3_bsa`], [`tes_nif`]). Once the plugin is added,
-//! `.esm`/`.esp` plugins load as [`EsmAsset`], `.bsa` archives as [`BsaAsset`], and `.nif`
-//! models as [`NifAsset`] through the regular [`AssetServer`]:
+//! [`BethPlugin`] registers a **`tes://` asset source** backed by [`TesVfs`] — a layered,
+//! case-insensitive view of a Morrowind `Data Files` directory where loose files override
+//! BSA archives — plus [`AssetLoader`]s for the game's formats. Once the plugin is added,
+//! any file the game could resolve is loadable through the regular
+//! [`AssetServer`], whether it exists loose on disk or only inside an archive:
 //!
 //! ```no_run
 //! use bevy::prelude::*;
-//! use bevy_beth::{BethPlugin, EsmAsset};
+//! use bevy_beth::{BethPlugin, EsmAsset, NifAsset};
 //!
 //! fn load(asset_server: Res<AssetServer>) {
-//!     let _handle: Handle<EsmAsset> = asset_server.load("Morrowind.esm");
+//!     let _esm: Handle<EsmAsset> = asset_server.load("tes://Morrowind.esm");
+//!     let _nif: Handle<NifAsset> = asset_server.load("tes://meshes/i/in_de_shack_01.nif");
 //! }
 //!
 //! App::new()
-//!     .add_plugins((AssetPlugin::default(), BethPlugin::default()))
-//!     .add_systems(Startup, load);
+//!     // BethPlugin FIRST: asset sources must be registered before AssetPlugin
+//!     // (part of DefaultPlugins) builds the AssetServer.
+//!     .add_plugins((BethPlugin::new("data"), DefaultPlugins))
+//!     .add_systems(Startup, load)
+//!     .run();
 //! ```
 //!
-//! The `asset_root` on [`BethPlugin`] must match the `file_path` on [`AssetPlugin`] so
-//! that [`BsaAsset`] loading can mmap the archive directly from disk. Both default to
-//! `"assets"`.
+//! With the `scene` feature (implied by `render`), a NIF load additionally emits
+//! spawnable content as labeled sub-assets — `Mesh`es, `StandardMaterial`s (their
+//! textures resolved through the VFS, so archive-only textures work), and a
+//! `WorldAsset` scene preserving the model's node hierarchy:
 //!
-//! Decoding the loaded data into engine types — NIF scene graphs into per-shape meshes and
-//! materials, texture bytes into images — lives in the `convert` module, behind the
-//! `render` feature.
+//! ```ignore
+//! // (requires the `scene` feature)
+//! use bevy::world_serialization::WorldAssetRoot;
 //!
-//! [`AssetServer`]: bevy::asset::AssetServer
+//! fn spawn(mut commands: Commands, asset_server: Res<AssetServer>) {
+//!     commands.spawn(WorldAssetRoot(
+//!         asset_server.load("tes://meshes/i/in_de_shack_01.nif#Scene"),
+//!     ));
+//! }
+//! ```
+//!
+//! # Plugin ordering
+//!
+//! `BethPlugin` **must be added before** Bevy's `AssetPlugin` (i.e. before
+//! `DefaultPlugins`): Bevy requires custom asset sources to be registered before the
+//! `AssetServer` is built. The plugin asserts this at startup. Headless apps that build
+//! the `App` manually must also call `app.finish()` for loaders to be registered.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bevy::app::{App, Plugin};
-use bevy::asset::io::Reader;
-use bevy::asset::{Asset, AssetApp, AssetLoader, LoadContext};
+use bevy::asset::io::{AssetSourceBuilder, AssetSourceId, Reader};
+use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, LoadContext};
+use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
 use tes_nif::{Nif, NifError};
-use tes3_bsa::{Bsa, BsaError};
 use tes3_esm::{EsmError, Plugin as TesPlugin};
 
-#[cfg(feature = "render")]
+pub mod vfs;
+
+#[cfg(feature = "scene")]
 pub mod convert;
+#[cfg(feature = "scene")]
+mod scene;
+
+pub use vfs::{TesVfs, TesVfsReader};
 
 pub use tes_nif;
 /// Re-exports of the underlying parser crates, so downstream code can name the parsed
-/// types ([`tes3_esm::Record`], [`tes3_bsa::FileRecord`], [`tes_nif::Nif`], …) without
-/// taking a separate dependency.
+/// types ([`tes3_esm::Record`], [`tes3_bsa::Bsa`], [`tes_nif::Nif`], …) without taking a
+/// separate dependency.
 pub use tes3_bsa;
 pub use tes3_esm;
+
+/// The name of the asset source [`BethPlugin`] registers: load game data with paths like
+/// `tes://meshes/i/in_de_shack_01.nif`.
+pub const TES_SOURCE: &str = "tes";
+
+/// Shared handle to the game-data VFS, inserted by [`BethPlugin`] so systems (and the
+/// NIF loader) can query the same layered view the `tes://` source serves.
+#[derive(Resource, Clone)]
+pub struct TesVfsHandle(pub Arc<TesVfs>);
 
 /// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`].
 ///
@@ -55,20 +89,26 @@ pub use tes3_esm;
 #[derive(Asset, TypePath, Debug)]
 pub struct EsmAsset(pub TesPlugin);
 
-/// A parsed TES3 BSA archive wrapped as a Bevy [`Asset`].
-///
-/// Wraps an owned [`tes3_bsa::Bsa`]; access the file directory via the `0` field and read
-/// file bytes via [`Bsa::get`] or [`Bsa::bytes`].
-#[derive(Asset, TypePath, Debug)]
-pub struct BsaAsset(pub Bsa);
-
 /// A parsed NIF model (`.nif`) wrapped as a Bevy [`Asset`].
 ///
-/// Wraps an owned [`tes_nif::Nif`]; access the block graph via the `0` field, or walk the
-/// scene with [`Nif::instances`]. Convert to drawable meshes/materials via
-/// `convert::nif_to_parts` (behind the `render` feature).
+/// [`NifAsset::nif`] is the raw parsed block graph. With the `scene` feature the loader
+/// also emits renderable labeled sub-assets, reachable through the handle fields here or
+/// by label (`#Scene`, `#Mesh0`, `#Material0`, …) — mirroring Bevy's glTF loader.
 #[derive(Asset, TypePath, Debug)]
-pub struct NifAsset(pub Nif);
+pub struct NifAsset {
+    /// The parsed NIF block graph.
+    pub nif: Nif,
+    /// The model as a spawnable scene (labeled `Scene`): the NIF node hierarchy as
+    /// entities with `Transform`s, meshes and materials attached, under a Z-up→Y-up root.
+    #[cfg(feature = "scene")]
+    pub scene: bevy::asset::Handle<bevy::world_serialization::WorldAsset>,
+    /// One mesh per drawable `NiTriShape`, in traversal order (labeled `Mesh{i}`).
+    #[cfg(feature = "scene")]
+    pub meshes: Vec<bevy::asset::Handle<bevy::mesh::Mesh>>,
+    /// The distinct materials used by the shapes (labeled `Material{i}`).
+    #[cfg(feature = "scene")]
+    pub materials: Vec<bevy::asset::Handle<bevy::pbr::StandardMaterial>>,
+}
 
 /// Loads `.esm`/`.esp` files into [`EsmAsset`].
 #[derive(Default, TypePath)]
@@ -96,39 +136,14 @@ impl AssetLoader for EsmLoader {
     }
 }
 
-/// Loads `.bsa` archives into [`BsaAsset`] by mmapping the archive file directly.
-///
-/// The `asset_root` must match the `file_path` configured on Bevy's [`AssetPlugin`] so
-/// the loader can resolve the archive's OS path.
+/// Loads `.nif` models into [`NifAsset`], emitting scene sub-assets under the `scene`
+/// feature. Holds the VFS to resolve texture references (extension swaps, archive-only
+/// textures) at load time.
 #[derive(TypePath)]
-struct BsaLoader {
-    asset_root: PathBuf,
+struct NifLoader {
+    #[cfg_attr(not(feature = "scene"), allow(dead_code))]
+    vfs: Arc<TesVfs>,
 }
-
-impl AssetLoader for BsaLoader {
-    type Asset = BsaAsset;
-    type Settings = ();
-    type Error = BsaError;
-
-    async fn load(
-        &self,
-        _reader: &mut dyn Reader,
-        _settings: &(),
-        load_context: &mut LoadContext<'_>,
-    ) -> Result<BsaAsset, BsaError> {
-        let path = self.asset_root.join(load_context.path().path());
-        Ok(BsaAsset(Bsa::open(path)?))
-    }
-
-    fn extensions(&self) -> &[&str] {
-        // Bevy matches extensions case-sensitively; game data mixes cases freely.
-        &["bsa", "BSA"]
-    }
-}
-
-/// Loads `.nif` models into [`NifAsset`].
-#[derive(Default, TypePath)]
-struct NifLoader;
 
 impl AssetLoader for NifLoader {
     type Asset = NifAsset;
@@ -139,11 +154,27 @@ impl AssetLoader for NifLoader {
         &self,
         reader: &mut dyn Reader,
         _settings: &(),
-        _load_context: &mut LoadContext<'_>,
+        load_context: &mut LoadContext<'_>,
     ) -> Result<NifAsset, NifError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.map_err(NifError::Io)?;
-        Ok(NifAsset(Nif::parse(&bytes)?))
+        let nif = Nif::parse(&bytes)?;
+
+        #[cfg(feature = "scene")]
+        {
+            let out = scene::build(&nif, &self.vfs, load_context);
+            Ok(NifAsset {
+                nif,
+                scene: out.scene,
+                meshes: out.meshes,
+                materials: out.materials,
+            })
+        }
+        #[cfg(not(feature = "scene"))]
+        {
+            let _ = load_context;
+            Ok(NifAsset { nif })
+        }
     }
 
     fn extensions(&self) -> &[&str] {
@@ -153,37 +184,71 @@ impl AssetLoader for NifLoader {
     }
 }
 
-/// Bevy plugin that registers the TES3 asset types and their loaders.
+/// Bevy plugin registering the `tes://` asset source and the TES3 asset loaders.
 ///
-/// The `asset_root` field must match the `file_path` on Bevy's
-/// [`AssetPlugin`](bevy::asset::AssetPlugin) — both default to `"assets"`. Set them to
-/// the same value when using a non-default asset directory.
-///
-/// Requires Bevy's [`AssetPlugin`](bevy::asset::AssetPlugin) to be present (it is part of
-/// `DefaultPlugins`); add it explicitly in headless apps.
+/// **Must be added before Bevy's `AssetPlugin`** (i.e. before `DefaultPlugins`) — asset
+/// sources can only be registered before the `AssetServer` exists; the plugin asserts
+/// this. See the [crate docs](crate) for a full example.
 pub struct BethPlugin {
-    /// The filesystem root from which `.bsa` archives are resolved.
-    /// Must match [`AssetPlugin::file_path`](bevy::asset::AssetPlugin::file_path).
-    pub asset_root: PathBuf,
+    /// The Morrowind `Data Files` directory the VFS serves (loose files + `*.bsa`).
+    pub data_root: PathBuf,
+    /// Explicit archive load order (later archives override earlier ones). `None`
+    /// discovers `*.bsa` at the root ordered by modification time, which reproduces the
+    /// vanilla game's effective order.
+    pub archives: Option<Vec<PathBuf>>,
+}
+
+impl BethPlugin {
+    /// A plugin serving `data_root` with auto-discovered archives.
+    pub fn new(data_root: impl Into<PathBuf>) -> Self {
+        BethPlugin {
+            data_root: data_root.into(),
+            archives: None,
+        }
+    }
 }
 
 impl Default for BethPlugin {
+    /// Serves `"data"`, the workspace's conventional game-data directory.
     fn default() -> Self {
-        Self {
-            asset_root: PathBuf::from("assets"),
-        }
+        BethPlugin::new("data")
     }
 }
 
 impl Plugin for BethPlugin {
     fn build(&self, app: &mut App) {
+        assert!(
+            app.world().get_resource::<AssetServer>().is_none(),
+            "BethPlugin must be added before Bevy's AssetPlugin (add it before DefaultPlugins)"
+        );
+
+        let vfs = match &self.archives {
+            Some(list) => TesVfs::new(&self.data_root, list),
+            None => TesVfs::open(&self.data_root),
+        };
+        let vfs = Arc::new(vfs.unwrap_or_else(|e| {
+            // Keep dataless apps (tests, fresh checkouts) bootable: loads just miss.
+            eprintln!(
+                "bevy-beth: cannot open data root {}: {e}; `tes://` loads will find nothing",
+                self.data_root.display()
+            );
+            TesVfs::empty()
+        }));
+
+        app.insert_resource(TesVfsHandle(vfs.clone()));
+        app.register_asset_source(
+            AssetSourceId::from(TES_SOURCE),
+            AssetSourceBuilder::new(move || Box::new(TesVfsReader(vfs.clone()))),
+        );
+    }
+
+    // Loader registration needs the AssetServer, which only exists once AssetPlugin has
+    // built — hence the build/finish split (asset sources before, loaders after).
+    fn finish(&self, app: &mut App) {
+        let vfs = app.world().resource::<TesVfsHandle>().0.clone();
         app.init_asset::<EsmAsset>()
-            .init_asset::<BsaAsset>()
             .init_asset::<NifAsset>()
             .init_asset_loader::<EsmLoader>()
-            .register_asset_loader(BsaLoader {
-                asset_root: self.asset_root.clone(),
-            })
-            .init_asset_loader::<NifLoader>();
+            .register_asset_loader(NifLoader { vfs });
     }
 }

@@ -39,3 +39,8 @@ jobs:
       # so the suite passes on a clean checkout; unit + synthetic tests still run.
       - name: test
         run: cargo test --workspace
+
+      # The scene-emitting NIF load path compiles headless (no winit); its game-data
+      # tests self-skip like the rest.
+      - name: test (scene feature)
+        run: cargo test -p bevy-beth --features scene

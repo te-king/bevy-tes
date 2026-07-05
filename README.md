@@ -14,7 +14,7 @@ mmap-backed), and turn `.nif` models into textured, per-shape Bevy meshes and ma
 | [`tes3-esm`](crates/tes3-esm) | tes-core | Plugin (`.esm`/`.esp`) parser — all 43 TES3 record types |
 | [`tes3-bsa`](crates/tes3-bsa) | tes-core | BSA archive reader — mmap + zero-copy file slices, indexed lookup |
 | [`tes-nif`](crates/tes-nif) | tes-core | NIF 4.0.0.2 model parser — scene graph, geometry, textures, materials |
-| [`bevy-beth`](crates/bevy-beth) | all of the above | Bevy plugin: asset loaders + NIF→mesh/material conversion |
+| [`bevy-beth`](crates/bevy-beth) | all of the above | Bevy plugin: `tes://` asset source (loose files layered over BSAs) + loaders; NIFs load as spawnable scenes |
 
 The parser crates know nothing about Bevy; only `bevy-beth` bridges the two. Everything
 below `bevy-beth` also works standalone for tooling (see the `tes3-bsa` CLI example).
@@ -29,7 +29,12 @@ encodes the skip-when-absent convention.
 - **NIF** — static meshes parse and render with composed scene-graph transforms,
   per-shape base-colour textures (DDS/TGA) and materials. ~85% of Morrowind's 5,798
   models; the remainder use animation/particle/skinning blocks not yet decoded.
-- **Bevy** — `BethPlugin` registers `AssetLoader`s for all three formats.
+- **Bevy** — `BethPlugin` registers the `tes://` asset source: a case-insensitive VFS
+  layering loose data files over the BSA archives, exactly as the game resolves paths.
+  NIF loads emit labeled `Mesh`/`StandardMaterial`/scene sub-assets (glTF-loader style),
+  with textures resolved through the same VFS — so
+  `asset_server.load("tes://meshes/i/in_de_shack_01.nif#Scene")` just works, archived or
+  loose.
 
 ## Quickstart
 
@@ -37,13 +42,14 @@ You need your own copy of the game data (see [Game data](#game-data)); the code 
 tests pass without it.
 
 ```sh
-# Render a NIF to a PNG (writes the screenshot path to stdout):
+# Render a NIF to a PNG (writes the screenshot path to stdout). The model is named by
+# its game-data path and may live loose or inside a BSA archive:
 cargo run -p bevy-beth --example render_nif --features render -- \
-    data/meshes/i/In_De_Shack_01.nif
+    meshes/i/in_de_shack_01.nif
 
 # ...or open a live, rotating viewer:
 cargo run -p bevy-beth --example render_nif --features render -- \
-    data/meshes/i/In_De_Shack_01.nif --interactive
+    meshes/i/in_de_shack_01.nif --interactive
 
 # Load an ESM through Bevy's AssetServer and summarize it:
 cargo run -p bevy-beth --example load_esm -- data/Morrowind.esm
