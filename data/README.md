@@ -28,10 +28,10 @@ data/
 ```
 
 A mesh references its textures by filename (e.g. `In_De_Shack_01.nif` names
-`Tx_wood_siding.tga`); the render example resolves those names by walking up the mesh's
-ancestor directories and checking each `textures/` subdirectory, so a mesh nested at
-`data/meshes/i/…` finds `data/textures/…`. Because the engine sometimes ships a `.tga`-named
-texture as `.dds` (and vice versa), both extensions are tried.
+`Tx_wood_siding.tga`); `bevy-beth`'s NIF loader resolves those names under `textures/`
+through its VFS — checking loose files first, then the BSA archives, case-insensitively.
+Because the engine sometimes ships a `.tga`-named texture as `.dds` (and vice versa),
+both extensions are tried.
 
 This directory is the *only* place tests look for game data: every integration test
 resolves fixtures through the `tes-testdata` helper crate, which points here.

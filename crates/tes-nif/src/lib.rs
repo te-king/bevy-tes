@@ -324,6 +324,16 @@ impl Nif {
         self.blocks.get(r.index()?)
     }
 
+    /// The references scene traversal starts from: the footer's [`Nif::roots`], or block 0
+    /// when the footer is absent.
+    pub fn scene_roots(&self) -> &[BlockRef] {
+        if self.roots.is_empty() {
+            &[BlockRef(0)]
+        } else {
+            &self.roots
+        }
+    }
+
     /// Walk the scene graph from the roots, yielding a [`ShapeInstance`] for every drawable
     /// `NiTriShape` with its **world** transform composed down the tree. Hidden nodes/shapes
     /// and `RootCollisionNode` subtrees are skipped, and each shape's texture and material are
@@ -331,13 +341,7 @@ impl Nif {
     /// ancestor's).
     pub fn instances(&self) -> Vec<ShapeInstance<'_>> {
         let mut out = Vec::new();
-        let fallback = [BlockRef(0)];
-        let roots: &[BlockRef] = if self.roots.is_empty() {
-            &fallback
-        } else {
-            &self.roots
-        };
-        for &root in roots {
+        for &root in self.scene_roots() {
             self.collect_instances(root, &NifTransform::default(), &[], &mut out);
         }
         out
@@ -388,7 +392,12 @@ impl Nif {
     /// Resolve a shape's base-colour texture filename by walking its (inheritance-ordered)
     /// property references to the first [`TexturingProperty`], then following that to its
     /// [`SourceTexture`]. `None` when no external base texture applies.
-    fn base_texture(&self, properties: &[BlockRef]) -> Option<&L1String> {
+    ///
+    /// The property list must be inheritance-ordered — the shape's own properties first,
+    /// then each ancestor's, nearest first — as built during scene traversal (this is the
+    /// list [`Nif::instances`] resolves internally; it is public so custom traversals can
+    /// reuse the exact same precedence rules).
+    pub fn base_texture(&self, properties: &[BlockRef]) -> Option<&L1String> {
         for &p in properties {
             if let Some(Block::TexturingProperty(tp)) = self.block(p)
                 && let Some(Block::SourceTexture(st)) = self.block(tp.base_texture)
@@ -402,7 +411,9 @@ impl Nif {
 
     /// Resolve a shape's [`Material`] from the first [`Block::MaterialProperty`] in its
     /// (inheritance-ordered) property references. `None` when none applies.
-    fn material(&self, properties: &[BlockRef]) -> Option<Material> {
+    ///
+    /// See [`Nif::base_texture`] for the expected ordering of `properties`.
+    pub fn material(&self, properties: &[BlockRef]) -> Option<Material> {
         for &p in properties {
             if let Some(Block::MaterialProperty(m)) = self.block(p) {
                 return Some(*m);
