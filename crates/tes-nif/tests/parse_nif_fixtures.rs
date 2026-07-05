@@ -40,7 +40,7 @@ fn check(name: &str, expected_blocks: usize, first_is_node: bool) {
         "{name} header block count"
     );
     match (&nif.blocks[0], first_is_node) {
-        (Block::Node { .. }, true) | (Block::TriShape { .. }, false) => {}
+        (Block::Node(_), true) | (Block::TriShape(_), false) => {}
         (other, _) => panic!("{name} unexpected first block: {other:?}"),
     }
 }

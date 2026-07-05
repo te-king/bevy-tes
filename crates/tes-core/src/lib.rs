@@ -7,9 +7,8 @@
 //! - [`latin1`] — the Windows-1252 string types ([`L1Str`] / [`L1String`]).
 //! - [`bytes`] — small [`nom`] helpers for reading those strings and running field
 //!   parsers tolerantly.
-//! - [`math`] — plain numeric primitives ([`Vec3`], [`Matrix3`], [`Quaternion`], …) used
-//!   by the geometry-bearing formats. Deliberately Bevy/`glam`-free; downstream crates
-//!   convert these into engine types.
+//! - [`math`] — plain numeric primitives (currently just [`math::Color`]). Deliberately
+//!   Bevy/`glam`-free; downstream crates convert these into engine types.
 
 pub mod bytes;
 pub mod latin1;

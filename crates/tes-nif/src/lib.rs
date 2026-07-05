@@ -10,16 +10,15 @@
 //! type — there is no generic "skip unknown" path.
 //!
 //! This crate decodes the **static-mesh block graph** — the blocks needed to get textured
-//! triangle geometry out of a model: [`Block::Node`] (`NiNode` and friends),
-//! [`Block::TriShape`] (`NiTriShape`), [`Block::TriShapeData`] (`NiTriShapeData`, the actual
-//! mesh), the base-texture chain [`Block::TexturingProperty`] → [`Block::SourceTexture`]
-//! (which retains the diffuse texture filename), and [`Block::MaterialProperty`] (surface
-//! colours). [`Nif::instances`] walks the scene graph from its roots, composing transforms
-//! and resolving each shape's texture and material. Other property / extra-data blocks are
-//! decoded only far enough to walk past them (kept as [`Block::Other`] so block indices —
-//! which references rely on — stay aligned). Block types outside this set (particle systems,
-//! controllers, …) cause [`Nif::parse`] to fail with [`NifError::Parse`] naming the
-//! unsupported type.
+//! triangle geometry out of a model: [`Node`] (`NiNode` and friends), [`TriShape`]
+//! (`NiTriShape`), [`Block::TriShapeData`] (`NiTriShapeData`, the actual mesh), the
+//! base-texture chain [`TexturingProperty`] → [`SourceTexture`] (which retains the diffuse
+//! texture filename), and [`Block::MaterialProperty`] (surface colours). [`Nif::instances`]
+//! walks the scene graph from its roots, composing transforms and resolving each shape's
+//! texture and material. Other property / extra-data blocks are decoded only far enough to
+//! walk past them (kept as [`Block::Other`] so block indices — which [`BlockRef`]s rely on —
+//! stay aligned). Block types outside this set (particle systems, controllers, …) cause
+//! [`Nif::parse`] to fail with [`NifError::Parse`] naming the unsupported type.
 //!
 //! ```no_run
 //! let bytes = std::fs::read("model.nif").unwrap();
@@ -34,9 +33,6 @@
 //! }
 //! ```
 
-use nom::IResult;
-use nom::bytes::complete::take;
-use nom::number::complete::le_u32;
 use std::fmt;
 use tes_core::L1String;
 
@@ -80,6 +76,33 @@ pub struct NifHeader {
     pub version: u32,
     /// Number of blocks following the header.
     pub num_blocks: u32,
+}
+
+/// A reference from one block to another: an index into [`Nif::blocks`], with `-1` (on
+/// disk, any negative value) meaning "no block" ([`BlockRef::NONE`]). Resolve it with
+/// [`Nif::block`] or [`BlockRef::index`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockRef(i32);
+
+impl BlockRef {
+    /// The absent reference (`-1` on disk).
+    pub const NONE: BlockRef = BlockRef(-1);
+
+    /// `true` when this reference points at no block.
+    pub fn is_none(self) -> bool {
+        self.0 < 0
+    }
+
+    /// The index into [`Nif::blocks`], or `None` for [`BlockRef::NONE`].
+    pub fn index(self) -> Option<usize> {
+        usize::try_from(self.0).ok()
+    }
+}
+
+impl Default for BlockRef {
+    fn default() -> Self {
+        BlockRef::NONE
+    }
 }
 
 /// A local node transform: translation, a row-major 3×3 rotation matrix, and a uniform
@@ -185,48 +208,67 @@ pub struct TriMesh {
     pub triangles: Vec<[u16; 3]>,
 }
 
+/// `NiNode` (and node-like blocks): a transform, its child block references, its attached
+/// property references (inherited by descendants), and traversal flags.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Node {
+    pub transform: NifTransform,
+    pub children: Vec<BlockRef>,
+    /// References to attached property blocks, inherited by descendant shapes.
+    pub properties: Vec<BlockRef>,
+    /// `NiAVObject` "hidden" flag (bit 0): the node and its subtree should not be drawn.
+    pub hidden: bool,
+    /// `true` for a `RootCollisionNode`: its subtree is collision geometry, not visuals.
+    pub collision: bool,
+}
+
+/// `NiTriShape`: a transform, a reference to its [`Block::TriShapeData`], the references
+/// of its attached properties (used to resolve its texture and material), and the
+/// "hidden" flag.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriShape {
+    pub transform: NifTransform,
+    /// Reference to the geometry data ([`Block::TriShapeData`]).
+    pub data: BlockRef,
+    /// References to attached property blocks (texturing, material, alpha, …).
+    pub properties: Vec<BlockRef>,
+    /// `NiAVObject` "hidden" flag (bit 0): the shape should not be drawn.
+    pub hidden: bool,
+}
+
+/// `NiTexturingProperty`: retains the reference of the base (first-slot) texture, i.e. the
+/// [`SourceTexture`] providing the diffuse map. [`BlockRef::NONE`] when that slot is unused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TexturingProperty {
+    pub base_texture: BlockRef,
+}
+
+/// `NiSourceTexture`: an external texture reference, keeping the filename it names
+/// (e.g. `Tx_BeerStein.dds`). Empty for the internal-pixel-data case, which this crate
+/// doesn't decode.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SourceTexture {
+    pub file_name: L1String,
+}
+
 /// One decoded NIF block. Every block in the file produces exactly one entry (in file
-/// order), so an index into [`Nif::blocks`] matches the block references stored in other
-/// blocks (e.g. [`Block::TriShape::data`]). Blocks this crate doesn't model are kept as
+/// order), so an index into [`Nif::blocks`] matches the [`BlockRef`]s stored in other
+/// blocks (e.g. [`TriShape::data`]). Blocks this crate doesn't model are kept as
 /// [`Block::Other`] purely to preserve that indexing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
-    /// `NiNode` (and node-like blocks): a transform, its child block references, its attached
-    /// property references (inherited by descendants), and traversal flags.
-    Node {
-        transform: NifTransform,
-        children: Vec<i32>,
-        /// Block indices of attached property blocks, inherited by descendant shapes.
-        properties: Vec<i32>,
-        /// `NiAVObject` "hidden" flag (bit 0): the node and its subtree should not be drawn.
-        hidden: bool,
-        /// `true` for a `RootCollisionNode`: its subtree is collision geometry, not visuals.
-        collision: bool,
-    },
-    /// `NiTriShape`: a transform, a reference to its [`Block::TriShapeData`], the block
-    /// references of its attached properties (used to resolve its texture and material), and
-    /// the "hidden" flag.
-    TriShape {
-        transform: NifTransform,
-        /// Block index of the geometry data, or `-1` for none.
-        data: i32,
-        /// Block indices of attached property blocks (texturing, material, alpha, …).
-        properties: Vec<i32>,
-        /// `NiAVObject` "hidden" flag (bit 0): the shape should not be drawn.
-        hidden: bool,
-    },
+    /// `NiNode` and friends — see [`Node`].
+    Node(Node),
+    /// `NiTriShape` — see [`TriShape`].
+    TriShape(TriShape),
     /// `NiTriShapeData`: the actual triangle geometry.
     TriShapeData(TriMesh),
-    /// `NiTexturingProperty`: retains the block reference of the base (first-slot) texture,
-    /// i.e. the [`Block::SourceTexture`] providing the diffuse map. `-1` when that slot is
-    /// unused.
-    TexturingProperty { base_texture: i32 },
+    /// `NiTexturingProperty` — see [`TexturingProperty`].
+    TexturingProperty(TexturingProperty),
     /// `NiMaterialProperty`: the decoded surface [`Material`].
     MaterialProperty(Material),
-    /// `NiSourceTexture`: an external texture reference, keeping the filename it names
-    /// (e.g. `Tx_BeerStein.dds`). Empty for the internal-pixel-data case, which this crate
-    /// doesn't decode.
-    SourceTexture { file_name: L1String },
+    /// `NiSourceTexture` — see [`SourceTexture`].
+    SourceTexture(SourceTexture),
     /// A block parsed past but not represented (alpha, extra data, …).
     Other,
 }
@@ -238,17 +280,17 @@ pub struct Nif {
     pub header: NifHeader,
     /// Decoded blocks, one per block in the file, in file order.
     pub blocks: Vec<Block>,
-    /// Root block indices from the file footer; scene traversal starts here. Empty when the
-    /// footer is absent, in which case [`Nif::instances`] falls back to block 0.
-    pub roots: Vec<i32>,
+    /// Root block references from the file footer; scene traversal starts here. Empty when
+    /// the footer is absent, in which case [`Nif::instances`] falls back to block 0.
+    pub roots: Vec<BlockRef>,
 }
 
 impl Nif {
     /// Parse a NIF from an in-memory byte slice. Validates the version is [`VERSION_TES3`]
     /// and decodes every block (failing on any block type outside the supported set).
     pub fn parse(input: &[u8]) -> Result<Nif, NifError> {
-        let (rest, header) =
-            nif_header(input).map_err(|e| NifError::Parse(format!("header: {e:?}")))?;
+        let mut r = Reader::new(input);
+        let header = nif_header(&mut r).map_err(|e| e.at("header"))?;
         if header.version != VERSION_TES3 {
             return Err(NifError::Parse(format!(
                 "unsupported NIF version {:#010x} (expected {:#010x})",
@@ -256,7 +298,6 @@ impl Nif {
             )));
         }
 
-        let mut r = Reader::new(rest);
         let mut blocks = Vec::with_capacity(header.num_blocks as usize);
         for i in 0..header.num_blocks {
             let ty = r.string().map_err(|e| e.at(format!("block {i} type")))?;
@@ -277,6 +318,12 @@ impl Nif {
         })
     }
 
+    /// Resolve a [`BlockRef`] to its block, or `None` for [`BlockRef::NONE`] or an
+    /// out-of-range index.
+    pub fn block(&self, r: BlockRef) -> Option<&Block> {
+        self.blocks.get(r.index()?)
+    }
+
     /// Walk the scene graph from the roots, yielding a [`ShapeInstance`] for every drawable
     /// `NiTriShape` with its **world** transform composed down the tree. Hidden nodes/shapes
     /// and `RootCollisionNode` subtrees are skipped, and each shape's texture and material are
@@ -284,8 +331,9 @@ impl Nif {
     /// ancestor's).
     pub fn instances(&self) -> Vec<ShapeInstance<'_>> {
         let mut out = Vec::new();
-        let roots: &[i32] = if self.roots.is_empty() {
-            &[0]
+        let fallback = [BlockRef(0)];
+        let roots: &[BlockRef] = if self.roots.is_empty() {
+            &fallback
         } else {
             &self.roots
         };
@@ -299,46 +347,35 @@ impl Nif {
     /// `inherited` is the ancestors' property references, nearest first.
     fn collect_instances<'a>(
         &'a self,
-        block: i32,
+        block: BlockRef,
         world: &NifTransform,
-        inherited: &[i32],
+        inherited: &[BlockRef],
         out: &mut Vec<ShapeInstance<'a>>,
     ) {
-        match self.blocks.get(block as usize) {
-            Some(Block::Node {
-                transform,
-                children,
-                properties,
-                hidden,
-                collision,
-            }) => {
-                if *hidden || *collision {
+        match self.block(block) {
+            Some(Block::Node(node)) => {
+                if node.hidden || node.collision {
                     return;
                 }
-                let node_world = world.compose(transform);
+                let node_world = world.compose(&node.transform);
                 // A node's own properties sit nearer to descendants than its ancestors'.
-                let mut props = properties.clone();
+                let mut props = node.properties.clone();
                 props.extend_from_slice(inherited);
-                for &child in children {
+                for &child in &node.children {
                     self.collect_instances(child, &node_world, &props, out);
                 }
             }
-            Some(Block::TriShape {
-                transform,
-                data,
-                properties,
-                hidden,
-            }) => {
-                if *hidden {
+            Some(Block::TriShape(shape)) => {
+                if shape.hidden {
                     return;
                 }
-                let Some(Block::TriShapeData(mesh)) = self.blocks.get(*data as usize) else {
+                let Some(Block::TriShapeData(mesh)) = self.block(shape.data) else {
                     return;
                 };
-                let mut props = properties.clone();
+                let mut props = shape.properties.clone();
                 props.extend_from_slice(inherited);
                 out.push(ShapeInstance {
-                    transform: world.compose(transform),
+                    transform: world.compose(&shape.transform),
                     mesh,
                     base_texture: self.base_texture(&props),
                     material: self.material(&props),
@@ -349,16 +386,15 @@ impl Nif {
     }
 
     /// Resolve a shape's base-colour texture filename by walking its (inheritance-ordered)
-    /// property references to the first [`Block::TexturingProperty`], then following that to
-    /// its [`Block::SourceTexture`]. `None` when no external base texture applies.
-    fn base_texture(&self, properties: &[i32]) -> Option<&L1String> {
+    /// property references to the first [`TexturingProperty`], then following that to its
+    /// [`SourceTexture`]. `None` when no external base texture applies.
+    fn base_texture(&self, properties: &[BlockRef]) -> Option<&L1String> {
         for &p in properties {
-            if let Some(Block::TexturingProperty { base_texture }) = self.blocks.get(p as usize)
-                && let Some(Block::SourceTexture { file_name }) =
-                    self.blocks.get(*base_texture as usize)
-                && !file_name.decode().is_empty()
+            if let Some(Block::TexturingProperty(tp)) = self.block(p)
+                && let Some(Block::SourceTexture(st)) = self.block(tp.base_texture)
+                && !st.file_name.decode().is_empty()
             {
-                return Some(file_name);
+                return Some(&st.file_name);
             }
         }
         None
@@ -366,9 +402,9 @@ impl Nif {
 
     /// Resolve a shape's [`Material`] from the first [`Block::MaterialProperty`] in its
     /// (inheritance-ordered) property references. `None` when none applies.
-    fn material(&self, properties: &[i32]) -> Option<Material> {
+    fn material(&self, properties: &[BlockRef]) -> Option<Material> {
         for &p in properties {
-            if let Some(Block::MaterialProperty(m)) = self.blocks.get(p as usize) {
+            if let Some(Block::MaterialProperty(m)) = self.block(p) {
                 return Some(*m);
             }
         }
@@ -390,42 +426,7 @@ pub struct ShapeInstance<'a> {
     pub material: Option<Material>,
 }
 
-/// Parse the version-4.0.0.2 header: identifier line (terminated by `\n`), then the
-/// version and block-count `u32`s.
-fn nif_header(input: &[u8]) -> IResult<&[u8], NifHeader> {
-    let nl = input
-        .iter()
-        .position(|&b| b == b'\n')
-        .ok_or_else(|| nom_fail(input))?;
-    let ident = L1String::from_bytes(input[..nl].to_vec());
-    let input = &input[nl + 1..];
-
-    let (input, version) = le_u32(input)?;
-    let (input, num_blocks) = le_u32(input)?;
-    Ok((
-        input,
-        NifHeader {
-            ident,
-            version,
-            num_blocks,
-        },
-    ))
-}
-
-/// Read a block's inline type name: a little-endian `u32` length prefix followed by that
-/// many bytes (e.g. `NiNode`). This is the framing every 4.0.0.2 block begins with.
-pub fn block_type(input: &[u8]) -> IResult<&[u8], L1String> {
-    let (input, len) = le_u32(input)?;
-    let (input, bytes) = take(len as usize)(input)?;
-    Ok((input, L1String::from_bytes(bytes.to_vec())))
-}
-
-/// Build a nom error anchored at `input` for use with the `?` operator.
-fn nom_fail(input: &[u8]) -> nom::Err<nom::error::Error<&[u8]>> {
-    nom::Err::Failure(nom::error::Error::new(input, nom::error::ErrorKind::Verify))
-}
-
-// --- block body parsing -----------------------------------------------------------------
+// --- parsing -----------------------------------------------------------------------------
 
 /// A simple sequential cursor over the byte stream with bounds-checked little-endian reads.
 /// All reads advance the cursor; a short read produces a [`ReadError`].
@@ -434,7 +435,8 @@ struct Reader<'a> {
     pos: usize,
 }
 
-/// A short read while decoding a block body. Carries a description set via [`ReadError::at`].
+/// A short read while decoding the stream. Carries a description set via [`ReadError::at`].
+#[derive(Debug)]
 struct ReadError(String);
 
 impl ReadError {
@@ -463,6 +465,17 @@ impl<'a> Reader<'a> {
                 self.pos
             ))),
         }
+    }
+
+    /// Read up to and including the next `\n`, returning the bytes before it.
+    fn line(&mut self) -> RResult<&'a [u8]> {
+        let len = self.data[self.pos..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .ok_or_else(|| ReadError(format!("no newline after offset {}", self.pos)))?;
+        let line = self.take(len)?;
+        self.skip(1)?; // the newline itself
+        Ok(line)
     }
 
     fn u8(&mut self) -> RResult<u8> {
@@ -505,11 +518,29 @@ impl<'a> Reader<'a> {
         self.take(n).map(|_| ())
     }
 
-    /// A `u32` count followed by that many `i32` block references.
-    fn refs(&mut self) -> RResult<Vec<i32>> {
-        let n = self.u32()? as usize;
-        (0..n).map(|_| self.i32()).collect()
+    /// A single block reference (an `i32`, negative meaning "none").
+    fn block_ref(&mut self) -> RResult<BlockRef> {
+        Ok(BlockRef(self.i32()?))
     }
+
+    /// A `u32` count followed by that many block references.
+    fn refs(&mut self) -> RResult<Vec<BlockRef>> {
+        let n = self.u32()? as usize;
+        (0..n).map(|_| self.block_ref()).collect()
+    }
+}
+
+/// Parse the version-4.0.0.2 header: identifier line (terminated by `\n`), then the
+/// version and block-count `u32`s.
+fn nif_header(r: &mut Reader) -> RResult<NifHeader> {
+    let ident = L1String::from_bytes(r.line()?.to_vec());
+    let version = r.u32()?;
+    let num_blocks = r.u32()?;
+    Ok(NifHeader {
+        ident,
+        version,
+        num_blocks,
+    })
 }
 
 /// Dispatch a block body by its type name.
@@ -529,31 +560,31 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
             let hidden = av.hidden();
             let children = r.refs()?;
             let _effects = r.refs()?;
-            Block::Node {
+            Block::Node(Node {
                 transform: av.transform,
                 children,
                 properties: av.properties,
                 hidden,
                 collision: ty == "RootCollisionNode",
-            }
+            })
         }
         "NiTriShape" => {
             let av = av_object(r)?;
             let hidden = av.hidden();
-            let data = r.i32()?;
-            let _skin = r.i32()?;
-            Block::TriShape {
+            let data = r.block_ref()?;
+            r.block_ref()?; // skin instance ref
+            Block::TriShape(TriShape {
                 transform: av.transform,
                 data,
                 properties: av.properties,
                 hidden,
-            }
+            })
         }
         "NiTriShapeData" => Block::TriShapeData(tri_shape_data(r)?),
 
-        "NiTexturingProperty" => Block::TexturingProperty {
+        "NiTexturingProperty" => Block::TexturingProperty(TexturingProperty {
             base_texture: texturing_property(r)?,
-        },
+        }),
         "NiMaterialProperty" => Block::MaterialProperty(material_property(r)?),
         "NiAlphaProperty" => {
             ni_object_net(r)?;
@@ -575,17 +606,17 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
             r.skip(2)?; // flags
             Block::Other
         }
-        "NiSourceTexture" => Block::SourceTexture {
+        "NiSourceTexture" => Block::SourceTexture(SourceTexture {
             file_name: source_texture(r)?,
-        },
+        }),
         "NiStringExtraData" => {
-            r.i32()?; // next extra data ref
+            r.block_ref()?; // next extra data
             r.u32()?; // bytes remaining
             r.string()?;
             Block::Other
         }
         "NiTextKeyExtraData" => {
-            r.i32()?; // next extra data ref
+            r.block_ref()?; // next extra data
             r.u32()?; // bytes remaining
             let n = r.u32()?;
             for _ in 0..n {
@@ -602,8 +633,8 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
 /// `NiObjectNET`: name string + extra-data ref + controller ref.
 fn ni_object_net(r: &mut Reader) -> RResult<L1String> {
     let name = r.string()?;
-    r.i32()?; // extra data ref
-    r.i32()?; // controller ref
+    r.block_ref()?; // extra data
+    r.block_ref()?; // controller
     Ok(name)
 }
 
@@ -611,7 +642,7 @@ fn ni_object_net(r: &mut Reader) -> RResult<L1String> {
 /// flags word (bit 0 = hidden).
 struct AvObject {
     transform: NifTransform,
-    properties: Vec<i32>,
+    properties: Vec<BlockRef>,
     flags: u16,
 }
 
@@ -729,17 +760,18 @@ fn material_property(r: &mut Reader) -> RResult<Material> {
 }
 
 /// `NiTexturingProperty`: walk past flags, apply mode and the texture descriptors, returning
-/// the block reference of the base (slot 0) texture's `NiSourceTexture` (or `-1` if unused).
-fn texturing_property(r: &mut Reader) -> RResult<i32> {
+/// the reference of the base (slot 0) texture's `NiSourceTexture` (or [`BlockRef::NONE`] if
+/// unused).
+fn texturing_property(r: &mut Reader) -> RResult<BlockRef> {
     ni_object_net(r)?;
     r.u16()?; // flags
     r.u32()?; // apply mode
     let texture_count = r.u32()? as usize;
-    let mut base_texture = -1;
+    let mut base_texture = BlockRef::NONE;
     for slot in 0..texture_count {
         if r.boolean()? {
             // TexDesc: source ref + clamp + filter + uv set + ps2 l/k + unknown1
-            let source = r.i32()?;
+            let source = r.block_ref()?;
             if slot == 0 {
                 base_texture = source;
             }
@@ -762,7 +794,7 @@ fn source_texture(r: &mut Reader) -> RResult<L1String> {
         r.string()?
     } else {
         r.u8()?; // unknown byte
-        r.i32()?; // pixel data ref
+        r.block_ref()?; // pixel data
         L1String::default()
     };
     r.skip(4 + 4 + 4 + 1)?; // pixel layout + mipmap format + alpha format + is static
@@ -782,7 +814,8 @@ mod tests {
 
     #[test]
     fn parses_header_fields() {
-        let (_, h) = nif_header(&synthetic_header(3)).unwrap();
+        let bytes = synthetic_header(3);
+        let h = nif_header(&mut Reader::new(&bytes)).unwrap();
         assert_eq!(h.version, VERSION_TES3);
         assert_eq!(h.num_blocks, 3);
         assert_eq!(h.ident, "NetImmerse File Format, Version 4.0.0.2");
@@ -804,6 +837,15 @@ mod tests {
         bytes.extend_from_slice(name);
         let err = Nif::parse(&bytes).unwrap_err();
         assert!(format!("{err}").contains("NiParticleSystemController"));
+    }
+
+    #[test]
+    fn block_ref_resolves_only_valid_indices() {
+        assert_eq!(BlockRef::NONE.index(), None);
+        assert!(BlockRef::NONE.is_none());
+        assert_eq!(BlockRef(-7).index(), None);
+        assert_eq!(BlockRef(2).index(), Some(2));
+        assert!(!BlockRef(0).is_none());
     }
 
     #[test]

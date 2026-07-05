@@ -8,7 +8,6 @@ repository.workspace = true
 
 [dependencies]
 tes-core = { workspace = true }
-nom = { workspace = true }
 
 [dev-dependencies]
 # Tests pull a real .nif out of a BSA archive to exercise the parser.
