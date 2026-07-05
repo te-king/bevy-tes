@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bevy's Linux native deps (windowing/audio sys crates need these to compile).
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: rustfmt
+        run: cargo fmt --all --check
+
+      - name: clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: clippy (render feature)
+        run: cargo clippy -p bevy-beth --all-targets --features render -- -D warnings
+
+      # Game-data tests skip themselves when the (gitignored) fixtures are absent,
+      # so the suite passes on a clean checkout; unit + synthetic tests still run.
+      - name: test
+        run: cargo test --workspace

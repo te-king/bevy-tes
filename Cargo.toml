@@ -2,6 +2,12 @@
 members = ["crates/*"]
 resolver = "3"
 
+# Shared package metadata, inherited by each crate via `key.workspace = true`.
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/te-king/bevy-beth"
+
 [workspace.dependencies]
 # Internal crates (path deps shared across the workspace).
 tes-core = { path = "crates/tes-core" }

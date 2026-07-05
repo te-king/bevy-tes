@@ -45,7 +45,10 @@ fn parses_a_static_mesh_with_geometry() {
     // Every triangle index must be in range for the vertex buffer.
     for tri in &mesh.triangles {
         for &i in tri {
-            assert!((i as usize) < mesh.vertices.len(), "triangle index in range");
+            assert!(
+                (i as usize) < mesh.vertices.len(),
+                "triangle index in range"
+            );
         }
     }
 }

@@ -1,7 +1,10 @@
 [package]
 name = "tes-core"
+description = "Format-agnostic primitives (Windows-1252 strings, nom helpers) shared by the TES3 format parsers"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 nom = { workspace = true }

@@ -15,6 +15,7 @@
 use nom::IResult;
 use nom::bytes::complete::take;
 use nom::number::complete::le_u32;
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 use tes_core::L1String;
@@ -74,6 +75,8 @@ pub struct Bsa {
     mmap: memmap2::Mmap,
     /// Absolute byte offset within `mmap` at which the file data section begins.
     data_start: usize,
+    /// Normalized name → index into `files`, so [`get`](Self::get) is a hash lookup.
+    index: HashMap<String, usize>,
 }
 
 /// Read a little-endian `u32` from a fixed position in an exact-length block.
@@ -152,7 +155,19 @@ impl Bsa {
             )));
         }
 
-        Ok(Bsa { version, files, mmap, data_start })
+        let index = files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (normalize(&f.name.decode()), i))
+            .collect();
+
+        Ok(Bsa {
+            version,
+            files,
+            mmap,
+            data_start,
+            index,
+        })
     }
 
     /// Return the raw bytes for `record` as a zero-copy slice into the archive mapping.
@@ -162,11 +177,10 @@ impl Bsa {
     }
 
     /// Look up a file by path, case-insensitively and tolerant of `/` vs `\` separators.
-    /// Returns a zero-copy slice into the archive mapping on success.
-    /// Linear scan; build your own index if you need many lookups.
+    /// Returns a zero-copy slice into the archive mapping on success. A hash lookup against
+    /// an index built at open time.
     pub fn get(&self, name: &str) -> Option<&[u8]> {
-        let key = normalize(name);
-        let record = self.files.iter().find(|f| normalize(&f.name.decode()) == key)?;
+        let record = &self.files[*self.index.get(&normalize(name))?];
         Some(self.bytes(record))
     }
 }

@@ -1,7 +1,10 @@
 [package]
 name = "tes3-bsa"
+description = "Zero-copy, mmap-backed reader for TES3 (Morrowind) BSA archives"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 tes-core = { workspace = true }

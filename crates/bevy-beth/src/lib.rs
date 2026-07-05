@@ -22,9 +22,9 @@
 //! that [`BsaAsset`] loading can mmap the archive directly from disk. Both default to
 //! `"assets"`.
 //!
-//! Decoding meshes, textures and other content *out of* the loaded data (NIF → Bevy
-//! meshes/materials, textures → images, …) is future work; the [`convert`] module is its
-//! placeholder. For now this layer only exposes the parsed structures as Bevy assets.
+//! Decoding the loaded data into engine types — NIF scene graphs into per-shape meshes and
+//! materials, texture bytes into images — lives in the `convert` module, behind the
+//! `render` feature.
 //!
 //! [`AssetServer`]: bevy::asset::AssetServer
 
@@ -39,6 +39,7 @@ use tes_nif::{Nif, NifError};
 use tes3_bsa::{Bsa, BsaError};
 use tes3_esm::{EsmError, Plugin as TesPlugin};
 
+#[cfg(feature = "render")]
 pub mod convert;
 
 pub use tes_nif;
@@ -63,8 +64,9 @@ pub struct BsaAsset(pub Bsa);
 
 /// A parsed NIF model (`.nif`) wrapped as a Bevy [`Asset`].
 ///
-/// Wraps an owned [`tes_nif::Nif`]; access the header via the `0` field. (Currently the
-/// parser decodes only the header — see [`tes_nif`] for scope.)
+/// Wraps an owned [`tes_nif::Nif`]; access the block graph via the `0` field, or walk the
+/// scene with [`Nif::instances`]. Convert to drawable meshes/materials via
+/// `convert::nif_to_parts` (behind the `render` feature).
 #[derive(Asset, TypePath, Debug)]
 pub struct NifAsset(pub Nif);
 
@@ -89,7 +91,8 @@ impl AssetLoader for EsmLoader {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["esm", "esp"]
+        // Bevy matches extensions case-sensitively; game data mixes cases freely.
+        &["esm", "esp", "ESM", "ESP"]
     }
 }
 
@@ -118,7 +121,8 @@ impl AssetLoader for BsaLoader {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["bsa"]
+        // Bevy matches extensions case-sensitively; game data mixes cases freely.
+        &["bsa", "BSA"]
     }
 }
 
@@ -143,7 +147,9 @@ impl AssetLoader for NifLoader {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["nif"]
+        // Bevy matches extensions case-sensitively, and Morrowind ships plenty of
+        // upper-case `.NIF` files (e.g. `BM_Snow_01.NIF`).
+        &["nif", "NIF"]
     }
 }
 
@@ -163,7 +169,9 @@ pub struct BethPlugin {
 
 impl Default for BethPlugin {
     fn default() -> Self {
-        Self { asset_root: PathBuf::from("assets") }
+        Self {
+            asset_root: PathBuf::from("assets"),
+        }
     }
 }
 
@@ -173,7 +181,9 @@ impl Plugin for BethPlugin {
             .init_asset::<BsaAsset>()
             .init_asset::<NifAsset>()
             .init_asset_loader::<EsmLoader>()
-            .register_asset_loader(BsaLoader { asset_root: self.asset_root.clone() })
+            .register_asset_loader(BsaLoader {
+                asset_root: self.asset_root.clone(),
+            })
             .init_asset_loader::<NifLoader>();
     }
 }

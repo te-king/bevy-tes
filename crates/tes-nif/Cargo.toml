@@ -1,7 +1,10 @@
 [package]
 name = "tes-nif"
+description = "Parser for NetImmerse .nif models, version 4.0.0.2 (TES3 / Morrowind)"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 tes-core = { workspace = true }
