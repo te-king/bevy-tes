@@ -15,7 +15,7 @@ impl Sscr {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Sscr {
         let mut out = Sscr::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"DATA" => out.data = l1(sub.data),
                 b"NAME" => out.name = Some(l1(sub.data)),
                 _ => {}

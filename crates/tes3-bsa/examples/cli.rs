@@ -105,9 +105,7 @@ fn run_esm(path: &Path) -> ExitCode {
     println!("\nParsed records: {}", plugin.records.len());
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
-        *counts
-            .entry(String::from_utf8_lossy(&record.tag()).into_owned())
-            .or_default() += 1;
+        *counts.entry(record.tag().to_string()).or_default() += 1;
     }
     println!("\nRecords by type:");
     let mut by_count: Vec<_> = counts.iter().collect();

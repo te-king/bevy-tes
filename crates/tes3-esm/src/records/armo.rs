@@ -1,8 +1,7 @@
 //! `ARMO` — armor.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default, parse_struct};
 use crate::shared::BipedItem;
-use nom::IResult;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -16,24 +15,15 @@ pub struct ArmorData {
     pub armor_rating: u32,
 }
 
-fn armor_data(input: &[u8]) -> IResult<&[u8], ArmorData> {
-    let (input, kind) = le_u32(input)?;
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, health) = le_u32(input)?;
-    let (input, enchant_points) = le_u32(input)?;
-    let (input, armor_rating) = le_u32(input)?;
-    Ok((
-        input,
-        ArmorData {
-            kind,
-            weight,
-            value,
-            health,
-            enchant_points,
-            armor_rating,
-        },
-    ))
+parse_struct! {
+    fn armor_data -> ArmorData {
+        kind: le_u32,
+        weight: le_f32,
+        value: le_u32,
+        health: le_u32,
+        enchant_points: le_u32,
+        armor_rating: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -53,7 +43,7 @@ impl Armo {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Armo {
         let mut out = Armo::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = l1(sub.data),
                 b"FNAM" => out.name = l1(sub.data),

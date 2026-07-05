@@ -72,7 +72,7 @@ impl Race {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Race {
         let mut out = Race::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"FNAM" => out.name = Some(l1(sub.data)),
                 b"RADT" => out.data = parse_or_default(race_data, sub.data),

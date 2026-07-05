@@ -1,8 +1,7 @@
 //! `CLOT` — an item of clothing.
 
-use crate::common::{Subrecord, l1, le_f32, le_u16, le_u32, parse_or_default};
+use crate::common::{Subrecord, l1, le_f32, le_u16, le_u32, parse_or_default, parse_struct};
 use crate::shared::BipedItem;
-use nom::IResult;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -14,20 +13,13 @@ pub struct ClothingData {
     pub enchant_points: u16,
 }
 
-fn clothing_data(input: &[u8]) -> IResult<&[u8], ClothingData> {
-    let (input, kind) = le_u32(input)?;
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u16(input)?;
-    let (input, enchant_points) = le_u16(input)?;
-    Ok((
-        input,
-        ClothingData {
-            kind,
-            weight,
-            value,
-            enchant_points,
-        },
-    ))
+parse_struct! {
+    fn clothing_data -> ClothingData {
+        kind: le_u32,
+        weight: le_f32,
+        value: le_u16,
+        enchant_points: le_u16,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -46,7 +38,7 @@ impl Clot {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Clot {
         let mut out = Clot::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = l1(sub.data),
                 b"FNAM" => out.name = Some(l1(sub.data)),

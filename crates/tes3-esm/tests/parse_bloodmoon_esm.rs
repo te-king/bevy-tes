@@ -39,7 +39,7 @@ fn per_type_counts_match_reference() {
     let plugin = Plugin::parse(&bytes).unwrap();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
-        let tag = String::from_utf8_lossy(&record.tag()).into_owned();
+        let tag = record.tag().to_string();
         *counts.entry(tag).or_default() += 1;
     }
 
@@ -78,7 +78,7 @@ fn no_record_is_unknown() {
         .records
         .iter()
         .filter_map(|r| match r {
-            Record::Unknown { tag, .. } => Some(String::from_utf8_lossy(tag).into_owned()),
+            Record::Unknown { tag, .. } => Some(tag.to_string()),
             _ => None,
         })
         .collect();

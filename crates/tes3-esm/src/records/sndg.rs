@@ -17,7 +17,7 @@ impl Sndg {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Sndg {
         let mut out = Sndg::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"DATA" => out.kind = finish(le_u32(sub.data)).unwrap_or(0),
                 b"CNAM" => out.creature = Some(l1(sub.data)),

@@ -1,7 +1,6 @@
 //! `LOCK` — a lockpick.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default, parse_struct};
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -12,20 +11,13 @@ pub struct LockData {
     pub uses: u32,
 }
 
-fn lock_data(input: &[u8]) -> IResult<&[u8], LockData> {
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, quality) = le_f32(input)?;
-    let (input, uses) = le_u32(input)?;
-    Ok((
-        input,
-        LockData {
-            weight,
-            value,
-            quality,
-            uses,
-        },
-    ))
+parse_struct! {
+    fn lock_data -> LockData {
+        weight: le_f32,
+        value: le_u32,
+        quality: le_f32,
+        uses: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -42,7 +34,7 @@ impl Lock {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Lock {
         let mut out = Lock::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = l1(sub.data),
                 b"FNAM" => out.name = Some(l1(sub.data)),

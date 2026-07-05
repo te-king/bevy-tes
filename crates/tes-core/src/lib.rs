@@ -9,9 +9,12 @@
 //!   parsers tolerantly.
 //! - [`math`] — plain numeric primitives (currently just [`math::Color`]). Deliberately
 //!   Bevy/`glam`-free; downstream crates convert these into engine types.
+//! - [`paths`] — the game-data path normal form (case-insensitive, `\`-separated)
+//!   shared by every index that looks paths up.
 
 pub mod bytes;
 pub mod latin1;
 pub mod math;
+pub mod paths;
 
 pub use latin1::{L1Str, L1String};

@@ -15,7 +15,7 @@ impl Dial {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Dial {
         let mut out = Dial::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"DATA" => out.kind = sub.data.first().copied(),
                 _ => {}

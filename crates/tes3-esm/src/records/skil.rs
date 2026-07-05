@@ -44,7 +44,7 @@ impl Skil {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Skil {
         let mut out = Skil::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"INDX" => out.index = finish(le_u32(sub.data)).unwrap_or(0),
                 b"SKDT" => out.data = parse_or_default(skill_data, sub.data),
                 b"DESC" => out.description = Some(l1(sub.data)),

@@ -1,7 +1,6 @@
 //! `WEAP` — a weapon.
 
-use crate::common::{Subrecord, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{Subrecord, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default, parse_struct};
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -24,40 +23,23 @@ pub struct WeaponData {
     pub flags: u32,
 }
 
-fn weapon_data(input: &[u8]) -> IResult<&[u8], WeaponData> {
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, kind) = le_u16(input)?;
-    let (input, health) = le_u16(input)?;
-    let (input, speed) = le_f32(input)?;
-    let (input, reach) = le_f32(input)?;
-    let (input, enchant_points) = le_u16(input)?;
-    let (input, chop_min) = le_u8(input)?;
-    let (input, chop_max) = le_u8(input)?;
-    let (input, slash_min) = le_u8(input)?;
-    let (input, slash_max) = le_u8(input)?;
-    let (input, thrust_min) = le_u8(input)?;
-    let (input, thrust_max) = le_u8(input)?;
-    let (input, flags) = le_u32(input)?;
-    Ok((
-        input,
-        WeaponData {
-            weight,
-            value,
-            kind,
-            health,
-            speed,
-            reach,
-            enchant_points,
-            chop_min,
-            chop_max,
-            slash_min,
-            slash_max,
-            thrust_min,
-            thrust_max,
-            flags,
-        },
-    ))
+parse_struct! {
+    fn weapon_data -> WeaponData {
+        weight: le_f32,
+        value: le_u32,
+        kind: le_u16,
+        health: le_u16,
+        speed: le_f32,
+        reach: le_f32,
+        enchant_points: le_u16,
+        chop_min: le_u8,
+        chop_max: le_u8,
+        slash_min: le_u8,
+        slash_max: le_u8,
+        thrust_min: le_u8,
+        thrust_max: le_u8,
+        flags: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -75,7 +57,7 @@ impl Weap {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Weap {
         let mut out = Weap::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = l1(sub.data),
                 b"FNAM" => out.name = Some(l1(sub.data)),

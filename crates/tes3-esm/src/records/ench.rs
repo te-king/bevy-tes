@@ -1,8 +1,7 @@
 //! `ENCH` — an enchantment.
 
-use crate::common::{Subrecord, l1, le_u32, parse_or_default};
+use crate::common::{Subrecord, l1, le_u32, parse_or_default, parse_struct};
 use crate::shared::{Effect, effect};
-use nom::IResult;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -15,20 +14,13 @@ pub struct EnchantData {
     pub flags: u32,
 }
 
-fn enchant_data(input: &[u8]) -> IResult<&[u8], EnchantData> {
-    let (input, kind) = le_u32(input)?;
-    let (input, cost) = le_u32(input)?;
-    let (input, charge) = le_u32(input)?;
-    let (input, flags) = le_u32(input)?;
-    Ok((
-        input,
-        EnchantData {
-            kind,
-            cost,
-            charge,
-            flags,
-        },
-    ))
+parse_struct! {
+    fn enchant_data -> EnchantData {
+        kind: le_u32,
+        cost: le_u32,
+        charge: le_u32,
+        flags: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -42,7 +34,7 @@ impl Ench {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Ench {
         let mut out = Ench::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"ENDT" => out.data = parse_or_default(enchant_data, sub.data),
                 b"ENAM" => out.effects.push(parse_or_default(effect, sub.data)),

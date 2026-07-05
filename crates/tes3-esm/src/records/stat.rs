@@ -14,7 +14,7 @@ impl Stat {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Stat {
         let mut out = Stat::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = l1(sub.data),
                 _ => {}

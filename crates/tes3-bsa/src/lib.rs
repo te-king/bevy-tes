@@ -16,37 +16,22 @@ use nom::IResult;
 use nom::bytes::complete::take;
 use nom::number::complete::le_u32;
 use std::collections::HashMap;
-use std::fmt;
 use std::path::Path;
 use tes_core::L1String;
+use tes_core::paths::normalize;
 
 /// The only BSA layout version Morrowind/Tribunal/Bloodmoon use.
 pub const VERSION_TES3: u32 = 0x100;
 
 /// Error returned when reading or parsing a BSA archive.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum BsaError {
     /// I/O failure while reading the archive from disk.
-    Io(std::io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
     /// The byte stream could not be parsed as a valid TES3 BSA.
+    #[error("parse error: {0}")]
     Parse(String),
-}
-
-impl fmt::Display for BsaError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BsaError::Io(e) => write!(f, "I/O error: {e}"),
-            BsaError::Parse(msg) => write!(f, "parse error: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for BsaError {}
-
-impl From<std::io::Error> for BsaError {
-    fn from(e: std::io::Error) -> Self {
-        BsaError::Io(e)
-    }
 }
 
 /// Directory entry for a single archived file: its name, lookup hash, and location within
@@ -183,19 +168,6 @@ impl Bsa {
         let record = &self.files[*self.index.get(&normalize(name))?];
         Some(self.bytes(record))
     }
-}
-
-/// Normalize a path for comparison: lowercase, forward slashes to backslashes.
-fn normalize(path: &str) -> String {
-    path.chars()
-        .map(|c| {
-            if c == '/' {
-                '\\'
-            } else {
-                c.to_ascii_lowercase()
-            }
-        })
-        .collect()
 }
 
 /// Build a nom error anchored at `input` for use with the `?` operator.

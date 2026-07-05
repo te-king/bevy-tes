@@ -1,6 +1,6 @@
 //! `REGN` — a world region.
 
-use crate::common::{Color, Subrecord, color, finish, fixed_l1str, l1, le_u8};
+use crate::common::{Color, Subrecord, color, finish, fixed_l1str, l1, le_u8, parse_struct};
 use nom::IResult;
 use tes_core::L1String;
 
@@ -53,10 +53,11 @@ pub struct SoundChance {
     pub chance: u8,
 }
 
-fn sound_chance(input: &[u8]) -> IResult<&[u8], SoundChance> {
-    let (input, sound) = fixed_l1str(32)(input)?;
-    let (input, chance) = le_u8(input)?;
-    Ok((input, SoundChance { sound, chance }))
+parse_struct! {
+    fn sound_chance -> SoundChance {
+        sound: fixed_l1str(32),
+        chance: le_u8,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -74,7 +75,7 @@ impl Regn {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Regn {
         let mut out = Regn::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"FNAM" => out.name = l1(sub.data),
                 b"WEAT" => out.weather = finish(weather(sub.data)).unwrap_or_default(),

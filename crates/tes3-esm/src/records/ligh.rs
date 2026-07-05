@@ -1,7 +1,8 @@
 //! `LIGH` — a light.
 
-use crate::common::{Color, Subrecord, color, l1, le_f32, le_i32, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{
+    Color, Subrecord, color, l1, le_f32, le_i32, le_u32, parse_or_default, parse_struct,
+};
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -15,24 +16,15 @@ pub struct LightData {
     pub flags: u32,
 }
 
-fn light_data(input: &[u8]) -> IResult<&[u8], LightData> {
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, time) = le_i32(input)?;
-    let (input, radius) = le_u32(input)?;
-    let (input, color) = color(input)?;
-    let (input, flags) = le_u32(input)?;
-    Ok((
-        input,
-        LightData {
-            weight,
-            value,
-            time,
-            radius,
-            color,
-            flags,
-        },
-    ))
+parse_struct! {
+    fn light_data -> LightData {
+        weight: le_f32,
+        value: le_u32,
+        time: le_i32,
+        radius: le_u32,
+        color: color,
+        flags: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -50,7 +42,7 @@ impl Ligh {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Ligh {
         let mut out = Ligh::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"MODL" => out.model = Some(l1(sub.data)),
                 b"FNAM" => out.name = Some(l1(sub.data)),

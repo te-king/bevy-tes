@@ -1,8 +1,7 @@
 //! `SPEL` — a spell.
 
-use crate::common::{Subrecord, l1, le_u32, parse_or_default};
+use crate::common::{Subrecord, l1, le_u32, parse_or_default, parse_struct};
 use crate::shared::{Effect, effect};
-use nom::IResult;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -14,11 +13,12 @@ pub struct SpellData {
     pub flags: u32,
 }
 
-fn spell_data(input: &[u8]) -> IResult<&[u8], SpellData> {
-    let (input, kind) = le_u32(input)?;
-    let (input, cost) = le_u32(input)?;
-    let (input, flags) = le_u32(input)?;
-    Ok((input, SpellData { kind, cost, flags }))
+parse_struct! {
+    fn spell_data -> SpellData {
+        kind: le_u32,
+        cost: le_u32,
+        flags: le_u32,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -33,7 +33,7 @@ impl Spel {
     pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Spel {
         let mut out = Spel::default();
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
                 b"FNAM" => out.name = Some(l1(sub.data)),
                 b"SPDT" => out.data = parse_or_default(spell_data, sub.data),

@@ -392,6 +392,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "clap",
+ "tes-core",
  "tes-nif",
  "tes-testdata",
  "tes3-bsa",
@@ -4671,6 +4672,7 @@ dependencies = [
  "tes-core",
  "tes-testdata",
  "tes3-bsa",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4687,6 +4689,7 @@ dependencies = [
  "tes-core",
  "tes-testdata",
  "tes3-esm",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4696,6 +4699,7 @@ dependencies = [
  "nom",
  "tes-core",
  "tes-testdata",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

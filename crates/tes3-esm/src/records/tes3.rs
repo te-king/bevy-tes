@@ -44,7 +44,7 @@ impl Tes3 {
         let mut out = Tes3::default();
         let mut pending_master: Option<L1String> = None;
         for sub in subs {
-            match &sub.tag {
+            match &sub.tag.0 {
                 b"HEDR" => {
                     if let Some((version, flags, company, description, num_records)) =
                         finish(hedr(sub.data))
