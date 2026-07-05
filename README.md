@@ -28,9 +28,10 @@ encodes the skip-when-absent convention.
 - **BSA** — full archive read of all three shipped archives.
 - **NIF** — every model in the vanilla corpus (all three archives plus loose files,
   14,663 NIFs) parses. Static meshes render with composed scene-graph transforms,
-  per-shape base-colour textures (DDS/TGA) and materials; animation/particle/skinning
-  blocks are decoded far enough to walk past, so skinned and animated models yield
-  their bind-pose geometry (no animation playback yet).
+  per-shape base-colour textures (DDS/TGA) and materials, and `NiAlphaProperty`
+  transparency (alpha-tested cutouts for foliage, blended and additive surfaces);
+  animation/particle/skinning blocks are decoded far enough to walk past, so skinned
+  and animated models yield their bind-pose geometry (no animation playback yet).
 - **Bevy** — `BethPlugin` registers the `tes://` asset source: a case-insensitive VFS
   layering loose data files over the BSA archives, exactly as the game resolves paths.
   NIF loads emit labeled `Mesh`/`StandardMaterial`/scene sub-assets (glTF-loader style),

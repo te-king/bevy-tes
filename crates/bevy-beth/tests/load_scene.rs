@@ -127,6 +127,47 @@ fn nif_load_emits_scene_meshes_and_textured_materials() {
 }
 
 #[test]
+fn foliage_gets_alpha_masked_materials() {
+    // Bloodmoon's holly: leaf cards whose texture alpha marks the leaf shape. Its
+    // NiAlphaProperty (alpha test, GREATER) must come through as an alpha-masked
+    // material — this is what keeps the cards' backgrounds from rendering opaque.
+    if tes_testdata::fixture("Bloodmoon.bsa").is_none() {
+        return;
+    }
+
+    let mut app = headless_scene_app();
+    let handle: Handle<NifAsset> = app
+        .world()
+        .resource::<AssetServer>()
+        .load("tes://meshes/o/flora_bm_holly_06.nif");
+
+    let state = pump_until_loaded(&mut app, &handle);
+    assert!(
+        matches!(state, LoadState::Loaded),
+        "unexpected load state: {state:?}"
+    );
+
+    let material_handles = {
+        let assets = app.world().resource::<Assets<NifAsset>>();
+        assets
+            .get(&handle)
+            .expect("asset present once loaded")
+            .materials
+            .clone()
+    };
+    let materials = app.world().resource::<Assets<StandardMaterial>>();
+    let masked = material_handles
+        .iter()
+        .filter_map(|m| materials.get(m))
+        .filter(|m| matches!(m.alpha_mode, bevy::material::AlphaMode::Mask(_)))
+        .count();
+    assert!(
+        masked > 0,
+        "the holly's leaf materials should be alpha-masked"
+    );
+}
+
+#[test]
 fn scene_labels_are_addressable_directly() {
     if tes_testdata::fixture("meshes/i/In_De_Shack_01.nif").is_none() {
         return;
