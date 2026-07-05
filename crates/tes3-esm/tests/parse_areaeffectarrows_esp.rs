@@ -11,13 +11,18 @@ use tes3_esm::{Plugin, Record};
 
 const ESP_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/AreaEffectArrows.esp");
 
-fn load_bytes() -> Vec<u8> {
-    std::fs::read(ESP_PATH).expect("AreaEffectArrows.esp should be readable")
+/// The file is gitignored, locally supplied game data; `None` means skip the test.
+fn load_bytes() -> Option<Vec<u8>> {
+    if !std::path::Path::new(ESP_PATH).exists() {
+        eprintln!("skipping: {ESP_PATH} not present");
+        return None;
+    }
+    Some(std::fs::read(ESP_PATH).expect("AreaEffectArrows.esp should be readable"))
 }
 
 #[test]
 fn header_is_v12_plugin() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     assert_eq!(plugin.header.version, 1.2);
     // The defining ESP-vs-ESM property: the master flag is clear (inverse of an ESM).
@@ -31,7 +36,7 @@ fn header_is_v12_plugin() {
 
 #[test]
 fn depends_on_morrowind_master() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     // A plugin's HEDR carries MAST/DATA pairs for the masters it extends.
     assert_eq!(plugin.header.masters.len(), 1);
@@ -42,14 +47,14 @@ fn depends_on_morrowind_master() {
 
 #[test]
 fn total_record_count_matches_reference() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     assert_eq!(plugin.records.len(), 85);
 }
 
 #[test]
 fn per_type_counts_match_reference() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
@@ -87,7 +92,7 @@ fn per_type_counts_match_reference() {
 
 #[test]
 fn no_record_is_unknown() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     let unknown: Vec<_> = plugin
         .records

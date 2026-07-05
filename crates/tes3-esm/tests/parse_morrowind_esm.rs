@@ -10,14 +10,19 @@ use tes3_esm::{Plugin, Record};
 const ESM_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/Morrowind.esm");
 
 /// Read the file into an owned buffer to parse. The parsed `Plugin` owns its data, so it
-/// no longer depends on this buffer once parsing returns.
-fn load_bytes() -> Vec<u8> {
-    std::fs::read(ESM_PATH).expect("Morrowind.esm should be readable")
+/// no longer depends on this buffer once parsing returns. The file is gitignored,
+/// locally supplied game data; `None` means skip the test.
+fn load_bytes() -> Option<Vec<u8>> {
+    if !std::path::Path::new(ESM_PATH).exists() {
+        eprintln!("skipping: {ESM_PATH} not present");
+        return None;
+    }
+    Some(std::fs::read(ESM_PATH).expect("Morrowind.esm should be readable"))
 }
 
 #[test]
 fn header_is_decoded() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     assert_eq!(plugin.header.version, 1.2);
     assert!(
@@ -31,21 +36,21 @@ fn header_is_decoded() {
 
 #[test]
 fn first_record_is_the_header() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     assert!(matches!(plugin.records.first(), Some(Record::Tes3(_))));
 }
 
 #[test]
 fn total_record_count_matches_reference() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     assert_eq!(plugin.records.len(), 48_296);
 }
 
 #[test]
 fn per_type_counts_match_reference() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
@@ -86,7 +91,7 @@ fn per_type_counts_match_reference() {
 
 #[test]
 fn no_record_is_unknown() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     let unknown = plugin
         .records
@@ -98,7 +103,7 @@ fn no_record_is_unknown() {
 
 #[test]
 fn records_decode_their_fields() {
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
 
     // A GMST with a known string value.
@@ -131,7 +136,7 @@ fn records_decode_their_fields() {
 #[test]
 fn strings_are_stored_undecoded_and_decode_lazily() {
     use std::borrow::Cow;
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     let plugin = Plugin::parse(&bytes).unwrap();
     // The L1String stores the raw Windows-1252 bytes as-is; the parser never transcoded
     // them.
@@ -148,7 +153,7 @@ fn parse_timing() {
     use std::time::Instant;
 
     // Read once so the measurement covers parsing, not disk I/O.
-    let bytes = load_bytes();
+    let Some(bytes) = load_bytes() else { return };
     const ITERATIONS: u32 = 100;
 
     let mut total = std::time::Duration::ZERO;
