@@ -10,23 +10,24 @@
 //! By default this renders one frame off a fixed three-quarter view, saves it to a PNG,
 //! and exits — printing the screenshot's absolute path so the image can be inspected.
 //! Pass `-o out.png` to choose where the screenshot lands, `--data <dir>` for a
-//! non-default data directory, or `--interactive` to instead open a live window that
-//! slowly rotates the model.
+//! non-default data directory, or `--interactive` to instead open a live window with a
+//! fly camera: hold the right mouse button to look, WASD to fly, Space/Q for up/down,
+//! Shift to go faster, scroll to rescale the base speed.
 //!
 //! All the loading heavy lifting — scene-graph traversal, texture resolution through
 //! loose files and archives, material construction — happens inside `bevy_beth`'s NIF
 //! loader; this example only spawns the scene and stages a camera, lights and ground
 //! around whatever geometry shows up.
 
-use std::f32::consts::PI;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
-use bevy::window::{ExitCondition, WindowResolution};
+use bevy::window::{CursorGrabMode, CursorOptions, ExitCondition, PrimaryWindow, WindowResolution};
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use clap::Parser;
 
@@ -48,7 +49,7 @@ struct Args {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Open a live, slowly-rotating window instead of capturing a single screenshot.
+    /// Open a live window with a fly camera instead of capturing a single screenshot.
     #[arg(long)]
     interactive: bool,
 }
@@ -76,14 +77,23 @@ struct Capture {
 #[derive(Resource, Default)]
 struct CaptureDone(bool);
 
-/// The pivot the model hangs off; the spin system (interactive mode) rotates it.
+/// The pivot the model hangs off; screenshot mode turns it to the three-quarter view.
 #[derive(Component)]
-struct Spin;
+struct Pivot;
 
 /// Child of the pivot holding the scene; `frame_scene` shifts it so the model's center
-/// sits on the pivot (and thus spins in place rather than orbiting).
+/// sits on the pivot (and thus on the world origin the camera is staged around).
 #[derive(Component)]
 struct Holder;
+
+/// Fly camera (interactive mode): yaw/pitch track the mouse-look orientation, `speed` is
+/// the base fly speed in world units per second, scaled to the model at framing time.
+#[derive(Component)]
+struct FreeCam {
+    yaw: f32,
+    pitch: f32,
+    speed: f32,
+}
 
 fn main() -> ExitCode {
     let args = Args::parse();
@@ -100,7 +110,7 @@ fn main() -> ExitCode {
             }),
             ..default()
         }))
-        .add_systems(Update, spin);
+        .add_systems(Update, free_cam);
     } else {
         // Screenshot mode: a hidden window is enough to drive the render target; we
         // capture one frame and exit. `close_when_requested` is off so nothing races our
@@ -154,7 +164,7 @@ fn setup(commands: &mut Commands, asset_server: &AssetServer, path: &str) {
             // A non-renderable pivot still needs Visibility so the child meshes, which
             // inherit it, aren't culled.
             Visibility::default(),
-            Spin,
+            Pivot,
         ))
         .id();
     commands.spawn((
@@ -186,8 +196,8 @@ fn frame_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     parts: Query<(&Mesh3d, &GlobalTransform)>,
-    mut holder: Query<&mut Transform, (With<Holder>, Without<Spin>)>,
-    mut pivot: Query<&mut Transform, With<Spin>>,
+    mut holder: Query<&mut Transform, (With<Holder>, Without<Pivot>)>,
+    mut pivot: Query<&mut Transform, With<Pivot>>,
     capture: Option<Res<Capture>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -286,15 +296,29 @@ fn frame_scene(
 
     // Frame the model: pull the camera back proportionally to its size, with ambient fill
     // so faces away from the key light aren't pure black.
-    commands.spawn((
+    let camera_transform = Transform::from_translation(Vec3::new(0.0, r * 0.6, r * 2.5))
+        .looking_at(Vec3::ZERO, Vec3::Y);
+    let mut camera = commands.spawn((
         Camera3d::default(),
-        Transform::from_translation(Vec3::new(0.0, r * 0.6, r * 2.5))
-            .looking_at(Vec3::ZERO, Vec3::Y),
+        camera_transform,
         AmbientLight {
             brightness: 200.0,
             ..default()
         },
     ));
+    if capture.is_none() {
+        // Fly camera, starting from the framing view; base speed crosses the model in a
+        // couple of seconds regardless of its scale.
+        let (yaw, pitch, _) = camera_transform.rotation.to_euler(EulerRot::YXZ);
+        camera.insert(FreeCam {
+            yaw,
+            pitch,
+            speed: r * 1.5,
+        });
+        println!(
+            "Controls: hold RMB to look, WASD to fly, Space/Q up/down, Shift boost, scroll for speed"
+        );
+    }
 
     // Key light: casts shadows, with the cascade sized to the model so the shadow map has
     // enough resolution regardless of model scale.
@@ -316,12 +340,75 @@ fn frame_scene(
     framed.0 = true;
 }
 
-fn spin(time: Res<Time>, framed: Res<Framed>, mut q: Query<&mut Transform, With<Spin>>) {
-    if !framed.0 {
+/// Fly-camera controller (interactive mode). Mouse-look engages only while the right
+/// button is held — the cursor locks for clean relative deltas and releases with the
+/// button, so the window stays usable. Movement is camera-relative except for the
+/// vertical axis, which is world-up (the usual editor-freecam convention).
+fn free_cam(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    motion: Res<AccumulatedMouseMotion>,
+    scroll: Res<AccumulatedMouseScroll>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    mut cam: Query<(&mut Transform, &mut FreeCam)>,
+) {
+    let Ok((mut transform, mut cam)) = cam.single_mut() else {
         return;
+    };
+
+    let looking = buttons.pressed(MouseButton::Right);
+    if let Ok(mut options) = cursor.single_mut() {
+        let want = if looking {
+            CursorGrabMode::Locked
+        } else {
+            CursorGrabMode::None
+        };
+        if options.grab_mode != want {
+            options.grab_mode = want;
+            options.visible = !looking;
+        }
     }
-    for mut t in &mut q {
-        t.rotation = Quat::from_rotation_y(time.elapsed_secs() * 0.4 * PI);
+    if looking && motion.delta != Vec2::ZERO {
+        cam.yaw -= motion.delta.x * 0.003;
+        // Stop just short of straight up/down so yaw stays well-defined.
+        cam.pitch = (cam.pitch - motion.delta.y * 0.003).clamp(-1.54, 1.54);
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, cam.yaw, cam.pitch, 0.0);
+    }
+
+    // Scroll rescales the base speed multiplicatively, so a few notches cover the range
+    // from lockpick-sized to building-sized models. Clamped per frame because trackpads
+    // report pixel deltas that would otherwise explode the exponent.
+    if scroll.delta.y != 0.0 {
+        cam.speed *= 1.15_f32.powf(scroll.delta.y.clamp(-4.0, 4.0));
+    }
+
+    let mut wish = Vec3::ZERO;
+    if keys.pressed(KeyCode::KeyW) {
+        wish += *transform.forward();
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        wish -= *transform.forward();
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        wish -= *transform.right();
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        wish += *transform.right();
+    }
+    if keys.pressed(KeyCode::Space) || keys.pressed(KeyCode::KeyE) {
+        wish += Vec3::Y;
+    }
+    if keys.pressed(KeyCode::KeyQ) || keys.pressed(KeyCode::ControlLeft) {
+        wish -= Vec3::Y;
+    }
+    if wish != Vec3::ZERO {
+        let boost = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+            4.0
+        } else {
+            1.0
+        };
+        transform.translation += wish.normalize() * cam.speed * boost * time.delta_secs();
     }
 }
 
