@@ -9,3 +9,6 @@ repository.workspace = true
 [dependencies]
 tes-core = { workspace = true }
 nom = { workspace = true }
+
+[dev-dependencies]
+tes-testdata = { workspace = true }

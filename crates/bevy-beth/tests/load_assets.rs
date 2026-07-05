@@ -4,7 +4,6 @@
 //! through Bevy's `AssetServer`; it is skipped when the (gitignored, locally supplied)
 //! game data is not present.
 
-use std::path::Path;
 use std::time::Duration;
 
 use bevy::app::App;
@@ -21,9 +20,9 @@ fn init_task_pools() {
     ComputeTaskPool::get_or_init(Default::default);
 }
 
-/// The bundled game data lives in the `tes3-esm` crate's `tests` dir. Bevy resolves the
-/// asset root relative to `CARGO_MANIFEST_DIR` (this crate), so reach across to it.
-const ASSET_ROOT: &str = "../tes3-esm/tests";
+/// The workspace `data/` directory holding the (gitignored) game data. Bevy resolves the
+/// asset root relative to `CARGO_MANIFEST_DIR` (this crate) when run under cargo.
+const ASSET_ROOT: &str = "../../data";
 
 fn app_with_assets() -> App {
     init_task_pools();
@@ -48,9 +47,7 @@ fn plugin_registers_asset_types() {
 
 #[test]
 fn loads_morrowind_esm_through_asset_server() {
-    let esm_path = format!("{ASSET_ROOT}/Morrowind.esm");
-    if !Path::new(&esm_path).exists() {
-        eprintln!("skipping: {esm_path} not present");
+    if tes_testdata::fixture("Morrowind.esm").is_none() {
         return;
     }
 

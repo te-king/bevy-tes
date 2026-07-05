@@ -1,7 +1,7 @@
 //! Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` via [`BethPlugin`]
 //! and print a summary of what was parsed.
 //!
-//! Run with the bundled master (default):
+//! Run with the local game master (default, see `data/README.md`):
 //!
 //! ```text
 //! cargo run --example load_esm
@@ -33,7 +33,7 @@ use bevy_beth::{BethPlugin, EsmAsset};
 #[derive(Parser, Debug)]
 struct Args {
     /// Path to the plugin file to load.
-    #[arg(default_value = "crates/tes3-esm/tests/Morrowind.esm")]
+    #[arg(default_value = "data/Morrowind.esm")]
     path: PathBuf,
 }
 

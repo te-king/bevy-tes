@@ -33,5 +33,5 @@ ancestor directories and checking each `textures/` subdirectory, so a mesh neste
 `data/meshes/i/…` finds `data/textures/…`. Because the engine sometimes ships a `.tga`-named
 texture as `.dds` (and vice versa), both extensions are tried.
 
-Note: `Morrowind.bsa` here is a *copy*; the `tes3-bsa` / `tes-nif` archive tests still read
-their own copy from `crates/tes3-bsa/tests/Morrowind.bsa`.
+This directory is the *only* place tests look for game data: every integration test
+resolves fixtures through the `tes-testdata` helper crate, which points here.

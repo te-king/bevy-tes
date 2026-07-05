@@ -3,23 +3,12 @@
 //! The files are (gitignored, locally supplied) game data; each test skips when its file
 //! isn't present, so a fresh checkout without the assets still passes.
 
-use std::path::PathBuf;
-
 use tes_nif::{Block, Nif, VERSION_TES3};
 
-/// Resolve a mesh fixture under the workspace `data/meshes` directory.
-fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/meshes")).join(name)
-}
-
-/// Read a fixture's bytes, or `None` (with a skip notice) when it isn't present.
+/// Read a mesh fixture's bytes from the workspace `data/meshes` directory, or `None`
+/// (with a skip notice) when it isn't present.
 fn read_fixture(name: &str) -> Option<Vec<u8>> {
-    let path = fixture(name);
-    if !path.exists() {
-        eprintln!("skipping: {} not present", path.display());
-        return None;
-    }
-    Some(std::fs::read(path).expect("read fixture"))
+    tes_testdata::read(&format!("meshes/{name}"))
 }
 
 /// Assert a fixture parses fully as a v4.0.0.2 NIF with the expected block count, and that

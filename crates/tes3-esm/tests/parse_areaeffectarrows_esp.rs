@@ -9,15 +9,9 @@ use std::collections::BTreeMap;
 
 use tes3_esm::{Plugin, Record};
 
-const ESP_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/AreaEffectArrows.esp");
-
 /// The file is gitignored, locally supplied game data; `None` means skip the test.
 fn load_bytes() -> Option<Vec<u8>> {
-    if !std::path::Path::new(ESP_PATH).exists() {
-        eprintln!("skipping: {ESP_PATH} not present");
-        return None;
-    }
-    Some(std::fs::read(ESP_PATH).expect("AreaEffectArrows.esp should be readable"))
+    tes_testdata::read("AreaEffectArrows.esp")
 }
 
 #[test]

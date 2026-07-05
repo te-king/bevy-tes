@@ -393,6 +393,7 @@ dependencies = [
  "bevy",
  "clap",
  "tes-nif",
+ "tes-testdata",
  "tes3-bsa",
  "tes3-esm",
 ]
@@ -4668,8 +4669,13 @@ name = "tes-nif"
 version = "0.1.0"
 dependencies = [
  "tes-core",
+ "tes-testdata",
  "tes3-bsa",
 ]
+
+[[package]]
+name = "tes-testdata"
+version = "0.1.0"
 
 [[package]]
 name = "tes3-bsa"
@@ -4679,6 +4685,7 @@ dependencies = [
  "memmap2",
  "nom",
  "tes-core",
+ "tes-testdata",
  "tes3-esm",
 ]
 
@@ -4688,6 +4695,7 @@ version = "0.1.0"
 dependencies = [
  "nom",
  "tes-core",
+ "tes-testdata",
 ]
 
 [[package]]

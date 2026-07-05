@@ -7,7 +7,7 @@
 //! the duration of the parse call:
 //!
 //! ```no_run
-//! let bytes = std::fs::read("crates/tes3-esm/tests/Morrowind.esm").unwrap();
+//! let bytes = std::fs::read("data/Morrowind.esm").unwrap();
 //! let plugin = tes3_esm::Plugin::parse(&bytes).unwrap();
 //! ```
 

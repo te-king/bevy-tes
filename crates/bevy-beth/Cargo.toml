@@ -22,6 +22,7 @@ render = ["bevy/3d", "bevy/dds", "bevy/tga"]
 
 [dev-dependencies]
 clap = { workspace = true }
+tes-testdata = { workspace = true }
 
 [[example]]
 name = "render_nif"

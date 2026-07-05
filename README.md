@@ -18,6 +18,9 @@ mmap-backed), and turn `.nif` models into textured, per-shape Bevy meshes and ma
 
 The parser crates know nothing about Bevy; only `bevy-beth` bridges the two. Everything
 below `bevy-beth` also works standalone for tooling (see the `tes3-bsa` CLI example).
+There is also [`tes-testdata`](crates/tes-testdata), an internal (unpublished)
+dev-dependency that locates the gitignored `data/` directory for integration tests and
+encodes the skip-when-absent convention.
 
 ## Status
 
