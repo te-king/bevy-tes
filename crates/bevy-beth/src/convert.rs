@@ -59,13 +59,20 @@ pub fn nif_transform(t: &NifTransform) -> Transform {
     }
 }
 
-/// Build the [`StandardMaterial`] for a shape from its resolved base-colour texture, NIF
-/// material and alpha property, mirroring how the game shades fixed-function surfaces:
+/// Build the [`StandardMaterial`] for a shape from its resolved base-colour and glow-map
+/// textures, NIF material and alpha property, mirroring how the game shades
+/// fixed-function surfaces:
 ///
 /// - with a material: diffuse tint (multiplied with the texture), emissive, and the
 ///   material alpha carried in the tint;
 /// - textured but no material: white, so the texture shows unmodified;
 /// - neither: a neutral tan stand-in.
+///
+/// A glow map becomes the [`emissive_texture`](StandardMaterial::emissive_texture). Bevy
+/// *multiplies* it with the `emissive` factor while the game's fixed-function pipeline
+/// *adds* the glow stage independently of the material's emissive colour — so with a glow
+/// map present the factor is forced to white (the map alone drives self-illumination),
+/// which matches vanilla assets: their glow-mapped shapes author black material emissive.
 ///
 /// Transparency follows the game's rule: it exists **only** when an `NiAlphaProperty`
 /// asks for it — without one the shape is opaque no matter what its material alpha says.
@@ -75,6 +82,7 @@ pub fn nif_transform(t: &NifTransform) -> Transform {
 /// (tent flaps, foliage), so materials render double-sided without culling.
 pub fn nif_material(
     base_color_texture: Option<Handle<Image>>,
+    emissive_texture: Option<Handle<Image>>,
     material: Option<&tes_nif::Material>,
     alpha: Option<tes_nif::AlphaProperty>,
 ) -> StandardMaterial {
@@ -87,10 +95,16 @@ pub fn nif_material(
         None if textured => (Color::WHITE, LinearRgba::BLACK),
         None => (Color::srgb(0.8, 0.7, 0.6), LinearRgba::BLACK),
     };
+    let emissive = if emissive_texture.is_some() {
+        LinearRgba::WHITE
+    } else {
+        emissive
+    };
     StandardMaterial {
         base_color,
         base_color_texture,
         emissive,
+        emissive_texture,
         alpha_mode: alpha_mode(alpha),
         // Morrowind's fixed-function look: matte unless a future glossiness mapping says
         // otherwise.

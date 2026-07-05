@@ -48,12 +48,18 @@ struct SpawnEntry {
 }
 
 /// Materials are deduplicated by what actually feeds the `StandardMaterial`: the resolved
-/// texture path, the material colours (bit patterns, so `f32`s can key a map) and the
-/// alpha property's flags/threshold.
-type MaterialKey = (Option<String>, Option<[u32; 7]>, Option<(u16, u8)>);
+/// base and glow texture paths, the material colours (bit patterns, so `f32`s can key a
+/// map) and the alpha property's flags/threshold.
+type MaterialKey = (
+    Option<String>,
+    Option<String>,
+    Option<[u32; 7]>,
+    Option<(u16, u8)>,
+);
 
 fn material_key(
     texture: &Option<String>,
+    glow: &Option<String>,
     material: Option<&tes_nif::Material>,
     alpha: Option<tes_nif::AlphaProperty>,
 ) -> MaterialKey {
@@ -70,6 +76,7 @@ fn material_key(
     });
     (
         texture.clone(),
+        glow.clone(),
         colors,
         alpha.map(|a| (a.flags, a.threshold)),
     )
@@ -109,6 +116,7 @@ pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>)
             shape,
             mesh,
             base_texture,
+            glow_texture,
             material,
             alpha,
         } => {
@@ -120,7 +128,8 @@ pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>)
                 convert::trimesh_to_mesh(mesh),
             );
             builder.meshes.push(mesh.clone());
-            let material = builder.material_for(base_texture, material, alpha, load_context);
+            let material =
+                builder.material_for(base_texture, glow_texture, material, alpha, load_context);
 
             builder.entries.push(SpawnEntry {
                 parent: *parents.last().expect("stack starts non-empty"),
@@ -182,15 +191,43 @@ struct SceneBuilder<'a> {
 impl SceneBuilder<'_> {
     /// The (deduplicated) material for a shape's resolved surface (as delivered by a
     /// [`WalkEvent::Shape`]), minting the labeled asset — and the texture dependency
-    /// load — on first sight.
+    /// loads — on first sight.
     fn material_for(
         &mut self,
         base_texture: Option<&L1String>,
+        glow_texture: Option<&L1String>,
         material: Option<tes_nif::Material>,
         alpha: Option<tes_nif::AlphaProperty>,
         load_context: &mut LoadContext<'_>,
     ) -> Handle<StandardMaterial> {
-        let texture = base_texture.and_then(|name| {
+        let texture = self.resolve_texture(base_texture, load_context);
+        let glow = self.resolve_texture(glow_texture, load_context);
+
+        let key = material_key(&texture, &glow, material.as_ref(), alpha);
+        if let Some(handle) = self.material_index.get(&key) {
+            return handle.clone();
+        }
+
+        let texture_handle = texture.map(|tex| load_texture(&tex, load_context));
+        let glow_handle = glow.map(|tex| load_texture(&tex, load_context));
+
+        let handle = load_context.add_labeled_asset(
+            format!("Material{}", self.materials.len()),
+            convert::nif_material(texture_handle, glow_handle, material.as_ref(), alpha),
+        );
+        self.materials.push(handle.clone());
+        self.material_index.insert(key, handle.clone());
+        handle
+    }
+
+    /// Resolve a NIF texture filename to its VFS path, warning (once per occurrence) when
+    /// the file is missing.
+    fn resolve_texture(
+        &self,
+        name: Option<&L1String>,
+        load_context: &LoadContext<'_>,
+    ) -> Option<String> {
+        name.and_then(|name| {
             let name = name.decode();
             let resolved = self.vfs.resolve_texture(&name);
             if resolved.is_none() {
@@ -200,36 +237,25 @@ impl SceneBuilder<'_> {
                 );
             }
             resolved
-        });
-
-        let key = material_key(&texture, material.as_ref(), alpha);
-        if let Some(handle) = self.material_index.get(&key) {
-            return handle.clone();
-        }
-
-        let texture_handle = texture.map(|tex| {
-            // A leading `/` re-roots at the same source: `tes://textures/...`.
-            let path = load_context
-                .path()
-                .resolve(&AssetPath::parse(&format!("/{tex}")));
-            load_context
-                .load_builder()
-                .with_settings(|s: &mut ImageLoaderSettings| {
-                    s.is_srgb = true; // base-colour maps are authored in sRGB
-                    let mut sampler = ImageSamplerDescriptor::default();
-                    // Morrowind UVs tile beyond [0, 1]; clamping smears edge texels.
-                    sampler.set_address_mode(ImageAddressMode::Repeat);
-                    s.sampler = ImageSampler::Descriptor(sampler);
-                })
-                .load::<Image>(path)
-        });
-
-        let handle = load_context.add_labeled_asset(
-            format!("Material{}", self.materials.len()),
-            convert::nif_material(texture_handle, material.as_ref(), alpha),
-        );
-        self.materials.push(handle.clone());
-        self.material_index.insert(key, handle.clone());
-        handle
+        })
     }
+}
+
+/// Start the dependency load for a resolved texture path within the same `tes://` source.
+/// Base-colour and glow maps alike are colour data: sRGB, with repeat addressing
+/// (Morrowind UVs tile beyond [0, 1]; clamping smears edge texels).
+fn load_texture(tex: &str, load_context: &mut LoadContext<'_>) -> Handle<Image> {
+    // A leading `/` re-roots at the same source: `tes://textures/...`.
+    let path = load_context
+        .path()
+        .resolve(&AssetPath::parse(&format!("/{tex}")));
+    load_context
+        .load_builder()
+        .with_settings(|s: &mut ImageLoaderSettings| {
+            s.is_srgb = true;
+            let mut sampler = ImageSamplerDescriptor::default();
+            sampler.set_address_mode(ImageAddressMode::Repeat);
+            s.sampler = ImageSampler::Descriptor(sampler);
+        })
+        .load::<Image>(path)
 }

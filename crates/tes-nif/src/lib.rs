@@ -12,8 +12,8 @@
 //! This crate decodes the **static-mesh block graph** — the blocks needed to get textured
 //! triangle geometry out of a model: [`Node`] (`NiNode` and friends), [`TriShape`]
 //! (`NiTriShape`), [`Block::TriShapeData`] (`NiTriShapeData`, the actual mesh), the
-//! base-texture chain [`TexturingProperty`] → [`SourceTexture`] (which retains the diffuse
-//! texture filename), [`Block::MaterialProperty`] (surface colours) and
+//! texture chain [`TexturingProperty`] → [`SourceTexture`] (which retains the diffuse and
+//! glow-map texture filenames), [`Block::MaterialProperty`] (surface colours) and
 //! [`Block::AlphaProperty`] (blend/cutout settings). [`Nif::instances`] walks the scene
 //! graph from its roots, composing transforms and resolving each shape's texture,
 //! material and alpha settings.
@@ -199,6 +199,7 @@ impl Nif {
                     shape,
                     mesh,
                     base_texture: self.base_texture(&props),
+                    glow_texture: self.glow_texture(&props),
                     material: self.material(&props),
                     alpha: self.alpha_property(&props),
                 });
@@ -225,6 +226,7 @@ impl Nif {
                 shape,
                 mesh,
                 base_texture,
+                glow_texture,
                 material,
                 alpha,
                 ..
@@ -236,6 +238,7 @@ impl Nif {
                         .compose(&shape.transform),
                     mesh,
                     base_texture,
+                    glow_texture,
                     material,
                     alpha,
                 });
@@ -253,9 +256,28 @@ impl Nif {
     /// list [`Nif::instances`] resolves internally; it is public so custom traversals can
     /// reuse the exact same precedence rules).
     pub fn base_texture(&self, properties: &[BlockRef]) -> Option<&L1String> {
+        self.texture_slot(properties, |tp| tp.base_texture)
+    }
+
+    /// Resolve a shape's glow-map texture filename (the [`TexturingProperty`]'s slot-4
+    /// texture, self-illumination added on top of the lit base colour). `None` when the
+    /// shape has none.
+    ///
+    /// See [`Nif::base_texture`] for the expected ordering of `properties`.
+    pub fn glow_texture(&self, properties: &[BlockRef]) -> Option<&L1String> {
+        self.texture_slot(properties, |tp| tp.glow_texture)
+    }
+
+    /// Shared body of [`Nif::base_texture`] / [`Nif::glow_texture`]: the named slot of the
+    /// first inherited [`TexturingProperty`], followed to its external [`SourceTexture`].
+    fn texture_slot(
+        &self,
+        properties: &[BlockRef],
+        slot: impl Fn(&TexturingProperty) -> BlockRef,
+    ) -> Option<&L1String> {
         for &p in properties {
             if let Some(Block::TexturingProperty(tp)) = self.block(p)
-                && let Some(Block::SourceTexture(st)) = self.block(tp.base_texture)
+                && let Some(Block::SourceTexture(st)) = self.block(slot(tp))
                 && !st.file_name.decode().is_empty()
             {
                 return Some(&st.file_name);
@@ -316,6 +338,8 @@ pub enum WalkEvent<'a> {
         mesh: &'a TriMesh,
         /// Base-colour texture filename (first inherited `NiTexturingProperty` slot).
         base_texture: Option<&'a L1String>,
+        /// Glow-map texture filename (slot 4), self-illumination on top of the base.
+        glow_texture: Option<&'a L1String>,
         /// Surface material (first inherited `NiMaterialProperty`).
         material: Option<Material>,
         /// Alpha settings (first inherited `NiAlphaProperty`); `None` renders opaque.
@@ -333,6 +357,9 @@ pub struct ShapeInstance<'a> {
     /// Base-colour texture filename (first inherited `NiTexturingProperty` slot), if any —
     /// e.g. `Tx_BeerStein.dds`. Resolve it against a texture directory or `Morrowind.bsa`.
     pub base_texture: Option<&'a L1String>,
+    /// Glow-map texture filename (slot 4), if any — self-illumination the game adds on
+    /// top of the lit base colour.
+    pub glow_texture: Option<&'a L1String>,
     /// Surface material (first inherited `NiMaterialProperty`), if any.
     pub material: Option<Material>,
     /// Alpha rendering settings (first inherited `NiAlphaProperty`), if any — `None`
@@ -353,7 +380,7 @@ mod tests {
     /// ├── 2 TriShape (hidden — skipped)
     /// ├── 6 Node (collision — subtree skipped)
     /// │   └── 4 TriShape
-    /// └── 7 TriShape (translation +X; inherits material A)
+    /// └── 7 TriShape (translation +X; inherits material A; textured via 11 → 12/13)
     /// ```
     fn synthetic_nif() -> Nif {
         let node = |translation, children: Vec<i32>, properties: Vec<i32>, collision| {
@@ -396,10 +423,20 @@ mod tests {
                 shape([0.0, 0.0, 0.0], vec![], false),                   // 4 (under collision)
                 Block::Other,                                            // 5
                 node([0.0, 0.0, 0.0], vec![4], vec![], true),            // 6 (collision)
-                shape([1.0, 0.0, 0.0], vec![], false),                   // 7
+                shape([1.0, 0.0, 0.0], vec![11], false),                 // 7
                 material(1.0),                                           // 8 (A)
                 Block::TriShapeData(TriMesh::default()),                 // 9
                 material(2.0),                                           // 10 (B)
+                Block::TexturingProperty(TexturingProperty {
+                    base_texture: BlockRef(12),
+                    glow_texture: BlockRef(13),
+                }), // 11
+                Block::SourceTexture(SourceTexture {
+                    file_name: L1String::from_bytes(b"base.dds".to_vec()),
+                }), // 12
+                Block::SourceTexture(SourceTexture {
+                    file_name: L1String::from_bytes(b"glow.dds".to_vec()),
+                }), // 13
             ],
             roots: vec![BlockRef(0)],
         }
@@ -444,5 +481,17 @@ mod tests {
         assert_eq!(instances[1].transform.translation, [1.0, 0.0, 1.0]); // root ∘ shape 7
         assert_eq!(instances[0].material.unwrap().glossiness, 2.0);
         assert_eq!(instances[1].material.unwrap().glossiness, 1.0);
+    }
+
+    #[test]
+    fn textures_resolve_per_slot_through_the_texturing_property() {
+        let nif = synthetic_nif();
+        let instances = nif.instances();
+        // Shape 3 has no texturing property anywhere in its chain.
+        assert_eq!(instances[0].base_texture, None);
+        assert_eq!(instances[0].glow_texture, None);
+        // Shape 7's own texturing property fills both slots.
+        assert_eq!(instances[1].base_texture.unwrap().decode(), "base.dds");
+        assert_eq!(instances[1].glow_texture.unwrap().decode(), "glow.dds");
     }
 }
