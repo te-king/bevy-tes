@@ -14,6 +14,7 @@ tes-nif = { workspace = true }
 bevy = { workspace = true }
 
 [features]
+default = ["scene", "render"]
 # NIF loads emit spawnable scenes: labeled Mesh/StandardMaterial/Image/WorldAsset
 # sub-assets. Headless-friendly — pulls bevy_pbr/bevy_world_serialization (and via them
 # mesh/image support) but NOT winit/windowing. dds+tga+bmp cover Morrowind's texture
