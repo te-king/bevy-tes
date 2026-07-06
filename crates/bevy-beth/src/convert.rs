@@ -13,6 +13,7 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::pbr::StandardMaterial;
 use bevy::transform::components::Transform;
 use tes_nif::{NifTransform, TriMesh};
+use tes3_esm::records::cell::ReferenceTransform;
 
 /// Convert a `NiTriShapeData` triangle mesh into a Bevy [`Mesh`], in the shape's **local
 /// space** (the scene builder puts the transform on the entity instead).
@@ -56,6 +57,28 @@ pub fn nif_transform(t: &NifTransform) -> Transform {
         translation: Vec3::from(t.translation),
         rotation: Quat::from_mat3(&rotation),
         scale: Vec3::splat(t.scale),
+    }
+}
+
+/// Convert a cell reference's placement into a Bevy Y-up [`Transform`], for an entity
+/// whose child is a NIF `#Scene`.
+///
+/// The game frame is Z-up; positions are in game units and rotations are XYZ Euler
+/// radians with the game's clockwise-positive convention (each axis rotation is applied
+/// **negated**, Z then Y then X — the same construction OpenMW uses). Every NIF `#Scene`
+/// already carries the Z-up→Y-up rotation `C` on its own root, so the game-frame rotation
+/// is *conjugated* into the Y-up frame here rather than converted per-axis: a content
+/// point `p` then passes `(C·q·C⁻¹)·C·p = C·(q·p)` — the game placement, axis-converted
+/// exactly once. `scale` is the reference's `XSCL`, clamped to the engine's `[0.5, 2.0]`.
+pub fn cell_reference_transform(t: &ReferenceTransform, scale: f32) -> Transform {
+    let c = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+    let [rx, ry, rz] = t.rotation;
+    let q_game =
+        Quat::from_rotation_x(-rx) * Quat::from_rotation_y(-ry) * Quat::from_rotation_z(-rz);
+    Transform {
+        translation: c * Vec3::from(t.position), // (x, y, z) → (x, z, -y)
+        rotation: c * q_game * c.inverse(),
+        scale: Vec3::splat(scale.clamp(0.5, 2.0)),
     }
 }
 
@@ -172,6 +195,59 @@ mod tests {
         assert_eq!(mode(1 | (6 << 1), 0), AlphaMode::Add);
         // A property with everything switched off is explicitly opaque.
         assert_eq!(mode(0, 128), AlphaMode::Opaque);
+    }
+
+    /// Quaternion equality via the dot product (handles the q/−q double cover;
+    /// `angle_between`'s `acos` turns f32 noise into ~1e-4 near identity).
+    fn assert_quat_eq(got: Quat, expected: Quat) {
+        assert!(
+            got.dot(expected).abs() > 1.0 - 1e-6,
+            "{got:?} vs {expected:?}"
+        );
+    }
+
+    #[test]
+    fn cell_reference_position_maps_zup_to_yup() {
+        let t = ReferenceTransform {
+            position: [1.0, 2.0, 3.0],
+            rotation: [0.0, 0.0, 0.0],
+        };
+        let out = cell_reference_transform(&t, 1.0);
+        assert!((out.translation - Vec3::new(1.0, 3.0, -2.0)).length() < 1e-6);
+        assert_quat_eq(out.rotation, Quat::IDENTITY);
+    }
+
+    #[test]
+    fn cell_reference_yaw_pins_to_a_yup_yaw() {
+        // A game-frame yaw (about Z-up) must become a Bevy yaw (about Y-up) of the same
+        // handedness: 90° clockwise seen from above = Ry(-90°) in Bevy.
+        let t = ReferenceTransform {
+            position: [0.0; 3],
+            rotation: [0.0, 0.0, std::f32::consts::FRAC_PI_2],
+        };
+        let out = cell_reference_transform(&t, 1.0);
+        let expected = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2);
+        assert_quat_eq(out.rotation, expected);
+    }
+
+    #[test]
+    fn cell_reference_transform_composes_with_the_nif_scene_root() {
+        // Full chain check: a point in NIF model space passes the #Scene root's internal
+        // Z-up→Y-up rotation, then this transform. The result must equal the game-frame
+        // placement (rotate, scale, translate in Z-up) converted to Y-up once.
+        let c = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let t = ReferenceTransform {
+            position: [10.0, 20.0, 30.0],
+            rotation: [0.1, 0.2, 0.3],
+        };
+        let out = cell_reference_transform(&t, 2.0);
+        let q_game =
+            Quat::from_rotation_x(-0.1) * Quat::from_rotation_y(-0.2) * Quat::from_rotation_z(-0.3);
+        for p in [Vec3::X, Vec3::new(0.5, -3.0, 2.0)] {
+            let got = out.transform_point(c * p);
+            let expected = c * (q_game * (2.0 * p) + Vec3::from(t.position));
+            assert!((got - expected).length() < 1e-4, "{p}: {got} vs {expected}");
+        }
     }
 
     #[test]

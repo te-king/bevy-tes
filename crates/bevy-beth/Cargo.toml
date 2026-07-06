@@ -16,8 +16,9 @@ bevy = { workspace = true }
 [features]
 # NIF loads emit spawnable scenes: labeled Mesh/StandardMaterial/Image/WorldAsset
 # sub-assets. Headless-friendly — pulls bevy_pbr/bevy_world_serialization (and via them
-# mesh/image support) but NOT winit/windowing. dds+tga cover Morrowind's texture formats.
-scene = ["bevy/bevy_pbr", "bevy/bevy_world_serialization", "bevy/dds", "bevy/tga"]
+# mesh/image support) but NOT winit/windowing. dds+tga+bmp cover Morrowind's texture
+# formats (a handful of vanilla textures are BMPs).
+scene = ["bevy/bevy_pbr", "bevy/bevy_world_serialization", "bevy/dds", "bevy/tga", "bevy/bmp"]
 # Full renderer + windowing on top of `scene`, so scenes can be drawn on screen.
 # The `render_nif` example needs it.
 render = ["scene", "bevy/3d"]
@@ -28,4 +29,8 @@ tes-testdata = { workspace = true }
 
 [[example]]
 name = "render_nif"
+required-features = ["render"]
+
+[[example]]
+name = "render_cell"
 required-features = ["render"]

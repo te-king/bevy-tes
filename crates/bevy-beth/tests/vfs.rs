@@ -72,6 +72,24 @@ fn resolve_texture_swaps_extensions() {
 }
 
 #[test]
+fn resolve_model_prepends_meshes() {
+    let root = SyntheticRoot::new("model");
+    let vfs = TesVfs::new(&root.0, Vec::<PathBuf>::new()).unwrap();
+
+    // MODL values are relative to meshes\ without the prefix.
+    assert_eq!(
+        vfs.resolve_model(r"x\Thing.NIF").as_deref(),
+        Some("meshes/x/thing.nif")
+    );
+    // An embedded meshes\ prefix (odd mods) still resolves.
+    assert_eq!(
+        vfs.resolve_model(r"meshes\x\thing.nif").as_deref(),
+        Some("meshes/x/thing.nif")
+    );
+    assert_eq!(vfs.resolve_model(r"x\nowhere.nif"), None);
+}
+
+#[test]
 fn reads_out_of_archives() {
     let Some(bsa) = tes_testdata::fixture("Morrowind.bsa") else {
         return;

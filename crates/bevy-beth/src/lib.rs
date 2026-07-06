@@ -39,6 +39,21 @@
 //! }
 //! ```
 //!
+//! Whole **cells** (interiors or exterior grid squares) spawn the same way from a loaded
+//! plugin — one child entity per placed object, each loading its own NIF scene (see
+//! [`cell`]):
+//!
+//! ```ignore
+//! use bevy_beth::{CellId, CellSeed};
+//!
+//! fn spawn(mut commands: Commands, asset_server: Res<AssetServer>) {
+//!     commands.spawn(CellSeed {
+//!         esm: asset_server.load("tes://Morrowind.esm"),
+//!         cell: CellId::interior("Balmora, Guild of Mages"),
+//!     });
+//! }
+//! ```
+//!
 //! # Plugin ordering
 //!
 //! `BethPlugin` **must be added before** Bevy's `AssetPlugin` (i.e. before
@@ -58,13 +73,19 @@ use bevy::reflect::TypePath;
 use tes_nif::{Nif, NifError};
 use tes3_esm::{EsmError, Plugin as TesPlugin};
 
+pub mod index;
 pub mod vfs;
 
+#[cfg(feature = "scene")]
+pub mod cell;
 #[cfg(feature = "scene")]
 pub mod convert;
 #[cfg(feature = "scene")]
 mod scene;
 
+#[cfg(feature = "scene")]
+pub use cell::{CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellWater};
+pub use index::{CellId, EsmIndex, ObjectInfo, ObjectKind};
 pub use vfs::{TesVfs, TesVfsReader};
 
 pub use tes_nif;
@@ -84,10 +105,14 @@ pub const TES_SOURCE: &str = "tes";
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
 /// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`].
-///
-/// Wraps an owned [`tes3_esm::Plugin`]; access the records via the `0` field.
 #[derive(Asset, TypePath, Debug)]
-pub struct EsmAsset(pub TesPlugin);
+pub struct EsmAsset {
+    /// The parsed plugin: header plus all records in file order.
+    pub plugin: TesPlugin,
+    /// Lookups over the records (editor id → object, cell name/grid → `CELL`), built
+    /// once at load time.
+    pub index: EsmIndex,
+}
 
 /// A parsed NIF model (`.nif`) wrapped as a Bevy [`Asset`].
 ///
@@ -127,7 +152,9 @@ impl AssetLoader for EsmLoader {
     ) -> Result<EsmAsset, EsmError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.map_err(EsmError::Io)?;
-        Ok(EsmAsset(TesPlugin::parse(&bytes)?))
+        let plugin = TesPlugin::parse(&bytes)?;
+        let index = EsmIndex::build(&plugin);
+        Ok(EsmAsset { plugin, index })
     }
 
     fn extensions(&self) -> &[&str] {
@@ -250,5 +277,7 @@ impl Plugin for BethPlugin {
             .init_asset::<NifAsset>()
             .init_asset_loader::<EsmLoader>()
             .register_asset_loader(NifLoader { vfs });
+        #[cfg(feature = "scene")]
+        app.add_systems(bevy::app::Update, cell::spawn_cells);
     }
 }

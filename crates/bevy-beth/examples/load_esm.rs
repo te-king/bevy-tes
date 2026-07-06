@@ -73,13 +73,17 @@ fn main() -> ExitCode {
     ComputeTaskPool::get_or_init(Default::default);
 
     let mut app = App::new();
+    // BethPlugin first: it must register its asset source before AssetPlugin builds the
+    // AssetServer (it asserts this).
     app.add_plugins((
+        BethPlugin::default(),
         AssetPlugin {
             file_path: root,
             ..Default::default()
         },
-        BethPlugin::default(),
     ));
+    // Headless apps must finish() themselves for loader registration to run.
+    app.finish();
 
     let handle: Handle<EsmAsset> = app
         .world()
@@ -116,7 +120,7 @@ fn main() -> ExitCode {
 }
 
 fn print_summary(path: &str, asset: &EsmAsset) {
-    let h = &asset.0.header;
+    let h = &asset.plugin.header;
     println!("Loaded {path} via Bevy AssetServer");
     println!("  version:          {}", h.version);
     println!("  master flag:      {}", h.flags & 0x1 != 0);
@@ -129,9 +133,9 @@ fn print_summary(path: &str, asset: &EsmAsset) {
         }
     }
 
-    println!("  parsed records:   {}", asset.0.records.len());
+    println!("  parsed records:   {}", asset.plugin.records.len());
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for record in &asset.0.records {
+    for record in &asset.plugin.records {
         *counts.entry(record.tag().to_string()).or_default() += 1;
     }
     let mut by_count: Vec<_> = counts.iter().collect();
