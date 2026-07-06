@@ -5,7 +5,7 @@
 //! String-bearing types own their text as [`L1String`](crate::L1String) (decoded on
 //! demand); purely numeric types ([`Effect`], [`AiData`], [`AmbientLight`]) are `Copy`.
 
-use super::common::{Color, color, fixed_l1str, flags, parse_struct};
+use super::common::{Color, color, enum_field, enumeration, fixed_l1str, flags, parse_struct};
 use nom::IResult;
 use nom::number::complete::{le_f32, le_i8, le_i32, le_u8, le_u16, le_u32};
 use tes_core::L1String;
@@ -36,6 +36,24 @@ bitflags::bitflags! {
     }
 }
 
+enum_field! {
+    /// A class or skill specialization. Shared by CLAS and SKIL.
+    pub enum Specialization: u32 {
+        Combat = 0,
+        Magic = 1,
+        Stealth = 2,
+    }
+}
+
+enum_field! {
+    /// Delivery range of a magic effect (stored as `Self` in the editor).
+    pub enum EffectRange: u32 {
+        OnSelf = 0,
+        Touch = 1,
+        Target = 2,
+    }
+}
+
 /// A single magic effect entry (`ENAM`, 24 bytes). Shared by SPEL, ENCH and ALCH.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Effect {
@@ -44,8 +62,7 @@ pub struct Effect {
     pub skill: i8,
     /// Attribute affected, or `-1` if not applicable.
     pub attribute: i8,
-    /// 0 = Self, 1 = Touch, 2 = Target.
-    pub range: u32,
+    pub range: EffectRange,
     pub area: u32,
     pub duration: u32,
     pub magnitude_min: u32,
@@ -57,7 +74,7 @@ parse_struct! {
         effect_index: le_u16,
         skill: le_i8,
         attribute: le_i8,
-        range: le_u32,
+        range: enumeration,
         area: le_u32,
         duration: le_u32,
         magnitude_min: le_u32,

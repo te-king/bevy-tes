@@ -1,6 +1,9 @@
 //! `CREA` — a creature.
 
-use crate::common::{Subrecord, finish, fixed_l1str, flags, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{
+    Subrecord, enum_field, enumeration, finish, fixed_l1str, flags, l1, le_f32, le_u32,
+    parse_or_default,
+};
 use crate::shared::{
     AiData, AiPackage, InventoryItem, TravelDestination, ai_activate, ai_data, ai_escort,
     ai_follow, ai_travel, ai_wander, inventory_item, travel_destination,
@@ -8,10 +11,19 @@ use crate::shared::{
 use nom::IResult;
 use tes_core::L1String;
 
+enum_field! {
+    /// Creature type (`NPDT`).
+    pub enum CreatureKind: u32 {
+        Creature = 0,
+        Daedra = 1,
+        Undead = 2,
+        Humanoid = 3,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CreatureData {
-    /// 0 = Creature, 1 = Daedra, 2 = Undead, 3 = Humanoid.
-    pub kind: u32,
+    pub kind: CreatureKind,
     pub level: u32,
     /// Eight attributes, ordered by attribute ID.
     pub attributes: [u32; 8],
@@ -28,7 +40,7 @@ pub struct CreatureData {
 }
 
 fn creature_data(input: &[u8]) -> IResult<&[u8], CreatureData> {
-    let (input, kind) = le_u32(input)?;
+    let (input, kind) = enumeration(input)?;
     let (input, level) = le_u32(input)?;
     let mut input = input;
     let mut attributes = [0u32; 8];

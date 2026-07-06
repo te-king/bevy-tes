@@ -1,13 +1,30 @@
 //! `CLOT` — an item of clothing.
 
-use crate::common::{Subrecord, l1, le_f32, le_u16, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, l1, le_f32, le_u16, parse_or_default, parse_struct,
+};
 use crate::shared::BipedItem;
 use tes_core::L1String;
 
+enum_field! {
+    /// Clothing slot (`CTDT`).
+    pub enum ClothingKind: u32 {
+        Pants = 0,
+        Shoes = 1,
+        Shirt = 2,
+        Belt = 3,
+        Robe = 4,
+        RightGlove = 5,
+        LeftGlove = 6,
+        Skirt = 7,
+        Ring = 8,
+        Amulet = 9,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ClothingData {
-    /// Clothing type (0 = Pants … 9 = Amulet).
-    pub kind: u32,
+    pub kind: ClothingKind,
     pub weight: f32,
     pub value: u16,
     pub enchant_points: u16,
@@ -15,7 +32,7 @@ pub struct ClothingData {
 
 parse_struct! {
     fn clothing_data -> ClothingData {
-        kind: le_u32,
+        kind: enumeration,
         weight: le_f32,
         value: le_u16,
         enchant_points: le_u16,

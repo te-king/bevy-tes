@@ -1,7 +1,7 @@
 //! `CLAS` — a character class.
 
-use crate::common::{Subrecord, flags, l1, le_u32, parse_or_default};
-use crate::shared::ServiceFlags;
+use crate::common::{Subrecord, enumeration, flags, l1, le_u32, parse_or_default};
+use crate::shared::{ServiceFlags, Specialization};
 use nom::IResult;
 use tes_core::L1String;
 
@@ -17,8 +17,7 @@ bitflags::bitflags! {
 pub struct ClassData {
     /// Two primary attribute IDs.
     pub primary_attributes: [u32; 2],
-    /// 0 = Combat, 1 = Magic, 2 = Stealth.
-    pub specialization: u32,
+    pub specialization: Specialization,
     /// Five (minor, major) skill pairs.
     pub skills: [[u32; 2]; 5],
     pub flags: ClassFlags,
@@ -29,7 +28,7 @@ pub struct ClassData {
 fn class_data(input: &[u8]) -> IResult<&[u8], ClassData> {
     let (input, p0) = le_u32(input)?;
     let (input, p1) = le_u32(input)?;
-    let (input, specialization) = le_u32(input)?;
+    let (input, specialization) = enumeration(input)?;
     let mut input = input;
     let mut skills = [[0u32; 2]; 5];
     for pair in skills.iter_mut() {

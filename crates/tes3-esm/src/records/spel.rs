@@ -1,6 +1,8 @@
 //! `SPEL` — a spell.
 
-use crate::common::{Subrecord, flags, l1, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, flags, l1, le_u32, parse_or_default, parse_struct,
+};
 use crate::shared::{Effect, effect};
 use tes_core::L1String;
 
@@ -14,17 +16,28 @@ bitflags::bitflags! {
     }
 }
 
+enum_field! {
+    /// Spell type (`SPDT`).
+    pub enum SpellKind: u32 {
+        Spell = 0,
+        Ability = 1,
+        Blight = 2,
+        Disease = 3,
+        Curse = 4,
+        Power = 5,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SpellData {
-    /// 0 = Spell, 1 = Ability, 2 = Blight, 3 = Disease, 4 = Curse, 5 = Power.
-    pub kind: u32,
+    pub kind: SpellKind,
     pub cost: u32,
     pub flags: SpellFlags,
 }
 
 parse_struct! {
     fn spell_data -> SpellData {
-        kind: le_u32,
+        kind: enumeration,
         cost: le_u32,
         flags: flags,
     }

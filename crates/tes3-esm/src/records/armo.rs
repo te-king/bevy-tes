@@ -1,13 +1,31 @@
 //! `ARMO` — armor.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, l1, le_f32, le_u32, parse_or_default, parse_struct,
+};
 use crate::shared::BipedItem;
 use tes_core::L1String;
 
+enum_field! {
+    /// Armor slot (`AODT`).
+    pub enum ArmorKind: u32 {
+        Helmet = 0,
+        Cuirass = 1,
+        LeftPauldron = 2,
+        RightPauldron = 3,
+        Greaves = 4,
+        Boots = 5,
+        LeftGauntlet = 6,
+        RightGauntlet = 7,
+        Shield = 8,
+        LeftBracer = 9,
+        RightBracer = 10,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ArmorData {
-    /// Armor type (0 = Helmet … 10 = Right Bracer).
-    pub kind: u32,
+    pub kind: ArmorKind,
     pub weight: f32,
     pub value: u32,
     pub health: u32,
@@ -17,7 +35,7 @@ pub struct ArmorData {
 
 parse_struct! {
     fn armor_data -> ArmorData {
-        kind: le_u32,
+        kind: enumeration,
         weight: le_f32,
         value: le_u32,
         health: le_u32,

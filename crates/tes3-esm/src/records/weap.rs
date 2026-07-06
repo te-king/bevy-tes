@@ -1,9 +1,30 @@
 //! `WEAP` — a weapon.
 
 use crate::common::{
-    Subrecord, flags, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default, parse_struct,
+    Subrecord, enum_field, enumeration, flags, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default,
+    parse_struct,
 };
 use tes_core::L1String;
+
+enum_field! {
+    /// Weapon type (`WPDT`).
+    pub enum WeaponKind: u16 {
+        ShortBladeOneHand = 0,
+        LongBladeOneHand = 1,
+        LongBladeTwoClose = 2,
+        BluntOneHand = 3,
+        BluntTwoClose = 4,
+        BluntTwoWide = 5,
+        SpearTwoWide = 6,
+        AxeOneHand = 7,
+        AxeTwoHand = 8,
+        MarksmanBow = 9,
+        MarksmanCrossbow = 10,
+        MarksmanThrown = 11,
+        Arrow = 12,
+        Bolt = 13,
+    }
+}
 
 bitflags::bitflags! {
     /// Weapon flags (`WPDT`).
@@ -18,8 +39,7 @@ bitflags::bitflags! {
 pub struct WeaponData {
     pub weight: f32,
     pub value: u32,
-    /// Weapon type (0 = short blade … 13 = bolt).
-    pub kind: u16,
+    pub kind: WeaponKind,
     pub health: u16,
     pub speed: f32,
     pub reach: f32,
@@ -37,7 +57,7 @@ parse_struct! {
     fn weapon_data -> WeaponData {
         weight: le_f32,
         value: le_u32,
-        kind: le_u16,
+        kind: enumeration,
         health: le_u16,
         speed: le_f32,
         reach: le_f32,

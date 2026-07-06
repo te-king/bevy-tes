@@ -1,6 +1,7 @@
 //! `INFO` — a dialogue response (child of the preceding `DIAL` record).
 
-use crate::common::{Subrecord, finish, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{Subrecord, enumeration, finish, l1, le_f32, le_u32, parse_or_default};
+use crate::records::dial::DialogueKind;
 use nom::IResult;
 use nom::number::complete::{le_i8, le_u8};
 use tes_core::L1String;
@@ -8,7 +9,7 @@ use tes_core::L1String;
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct InfoData {
     /// Duplicates the parent DIAL's dialogue type.
-    pub dialogue_type: u8,
+    pub dialogue_type: DialogueKind,
     /// Disposition threshold, or journal index for journal entries.
     pub disposition: u32,
     /// Required NPC rank, or `-1`.
@@ -20,7 +21,7 @@ pub struct InfoData {
 }
 
 fn info_data(input: &[u8]) -> IResult<&[u8], InfoData> {
-    let (input, dialogue_type) = le_u8(input)?;
+    let (input, dialogue_type) = enumeration(input)?;
     let (input, _unused) = nom::bytes::complete::take(3usize)(input)?;
     let (input, disposition) = le_u32(input)?;
     let (input, rank) = le_i8(input)?;

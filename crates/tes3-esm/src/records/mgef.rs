@@ -1,6 +1,9 @@
 //! `MGEF` — a magic effect.
 
-use crate::common::{Subrecord, finish, flags, l1, le_f32, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, finish, flags, l1, le_f32, le_u32, parse_or_default,
+    parse_struct,
+};
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -14,10 +17,21 @@ bitflags::bitflags! {
     }
 }
 
+enum_field! {
+    /// Spell school (`MEDT`).
+    pub enum MagicSchool: u32 {
+        Alteration = 0,
+        Conjuration = 1,
+        Destruction = 2,
+        Illusion = 3,
+        Mysticism = 4,
+        Restoration = 5,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MagicEffectData {
-    /// Spell school (0 = Alteration … 5 = Restoration).
-    pub school: u32,
+    pub school: MagicSchool,
     pub base_cost: f32,
     pub flags: MagicEffectFlags,
     pub red: u32,
@@ -30,7 +44,7 @@ pub struct MagicEffectData {
 
 parse_struct! {
     fn magic_effect_data -> MagicEffectData {
-        school: le_u32,
+        school: enumeration,
         base_cost: le_f32,
         flags: flags,
         red: le_u32,
