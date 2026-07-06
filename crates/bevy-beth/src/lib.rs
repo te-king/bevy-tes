@@ -66,7 +66,7 @@ use std::sync::Arc;
 
 use bevy::app::{App, Plugin};
 use bevy::asset::io::{AssetSourceBuilder, AssetSourceId, Reader};
-use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, LoadContext};
+use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, Assets, LoadContext};
 use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
@@ -278,6 +278,24 @@ impl Plugin for BethPlugin {
             .init_asset_loader::<EsmLoader>()
             .register_asset_loader(NifLoader { vfs });
         #[cfg(feature = "scene")]
-        app.add_systems(bevy::app::Update, cell::spawn_cells);
+        {
+            // The scene pipeline emits these asset types and `spawn_cells` borrows two of
+            // them as system parameters. Render apps register them via their plugins (in
+            // `build`, so before any `finish`); a headless app has none of that, and a
+            // missing `Assets<T>` resource would fail system-param validation at runtime.
+            init_asset_if_missing::<bevy::image::Image>(app);
+            init_asset_if_missing::<bevy::mesh::Mesh>(app);
+            init_asset_if_missing::<bevy::pbr::StandardMaterial>(app);
+            init_asset_if_missing::<bevy::world_serialization::WorldAsset>(app);
+            app.add_systems(bevy::app::Update, cell::spawn_cells);
+        }
+    }
+}
+
+/// Register `Assets<A>` only when nothing else (i.e. a render plugin) already has.
+#[cfg(feature = "scene")]
+fn init_asset_if_missing<A: bevy::asset::Asset>(app: &mut App) {
+    if !app.world().contains_resource::<Assets<A>>() {
+        app.init_asset::<A>();
     }
 }
