@@ -12,10 +12,12 @@
 //! ```
 
 pub mod common;
+mod macros;
 pub mod records;
 pub mod shared;
 
 use common::{RecordFlags, Subrecords, Tag, record_header};
+use macros::records;
 use nom::bytes::complete::take;
 
 pub use common::EsmError;
@@ -31,53 +33,6 @@ use records::{
     regn::Regn, repa::Repa, scpt::Scpt, skil::Skil, sndg::Sndg, soun::Soun, spel::Spel, sscr::Sscr,
     stat::Stat, weap::Weap,
 };
-
-/// Generate the [`Record`] enum and its tag dispatch from one `Variant(Type) = b"TAG"`
-/// table, so each record type is listed exactly once instead of three times (variant,
-/// tag accessor, parser dispatch).
-macro_rules! records {
-    ($( $variant:ident($ty:ty) = $tag:literal, )*) => {
-        /// A single parsed record. One variant per known TES3 record type, plus
-        /// [`Record::Unknown`] as a safety net for tags not modeled by this crate.
-        /// Records own their data and are `'static`.
-        #[derive(Debug, Clone, PartialEq)]
-        pub enum Record {
-            $( $variant($ty), )*
-            /// A record whose 4-byte tag is not recognized; its raw payload is preserved.
-            Unknown {
-                tag: Tag,
-                flags: RecordFlags,
-                data: Vec<u8>,
-            },
-        }
-
-        impl Record {
-            /// The 4-byte tag of this record.
-            pub fn tag(&self) -> Tag {
-                match self {
-                    $( Record::$variant(_) => Tag(*$tag), )*
-                    Record::Unknown { tag, .. } => *tag,
-                }
-            }
-
-            /// Build a typed record from its tag, header flags and data block.
-            fn from_parts(tag: Tag, flags: RecordFlags, data: &[u8]) -> Record {
-                // Subrecords are parsed lazily from `data`; a malformed/truncated
-                // subrecord just ends iteration (the record keeps whatever fields parsed
-                // before it). Only one match arm runs, so moving `subs` into it is fine.
-                let subs = Subrecords::new(data);
-                match &tag.0 {
-                    $( $tag => Record::$variant(<$ty>::from_subrecords(subs)), )*
-                    _ => Record::Unknown {
-                        tag,
-                        flags,
-                        data: data.to_vec(),
-                    },
-                }
-            }
-        }
-    };
-}
 
 records! {
     Tes3(Tes3) = b"TES3",

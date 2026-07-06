@@ -1,9 +1,9 @@
 //! `WEAP` — a weapon.
 
 use crate::common::{
-    Subrecord, enum_field, enumeration, flags, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default,
-    parse_struct,
+    Subrecord, enumeration, flags, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default,
 };
+use crate::macros::{enum_field, parse_struct};
 use tes_core::L1String;
 
 enum_field! {

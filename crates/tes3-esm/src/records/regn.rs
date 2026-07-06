@@ -1,6 +1,7 @@
 //! `REGN` — a world region.
 
-use crate::common::{Color, Subrecord, color, finish, fixed_l1str, l1, le_u8, parse_struct};
+use crate::common::{Color, Subrecord, color, finish, fixed_l1str, l1, le_u8};
+use crate::macros::parse_struct;
 use nom::IResult;
 use tes_core::L1String;
 

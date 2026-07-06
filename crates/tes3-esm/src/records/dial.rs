@@ -1,6 +1,7 @@
 //! `DIAL` — a dialogue topic. The `INFO` records that follow it belong to it.
 
-use crate::common::{Subrecord, enum_field, l1};
+use crate::common::{Subrecord, l1};
+use crate::macros::enum_field;
 use tes_core::L1String;
 
 enum_field! {

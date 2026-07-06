@@ -1,6 +1,7 @@
 //! `SNDG` — a sound generator.
 
-use crate::common::{Subrecord, enum_field, enumeration, finish, l1};
+use crate::common::{Subrecord, enumeration, finish, l1};
+use crate::macros::enum_field;
 use tes_core::L1String;
 
 enum_field! {

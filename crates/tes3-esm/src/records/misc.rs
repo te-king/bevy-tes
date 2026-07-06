@@ -1,6 +1,7 @@
 //! `MISC` — a miscellaneous item.
 
-use crate::common::{Subrecord, flags, l1, le_f32, le_u32, parse_or_default, parse_struct};
+use crate::common::{Subrecord, flags, l1, le_f32, le_u32, parse_or_default};
+use crate::macros::parse_struct;
 use tes_core::L1String;
 
 bitflags::bitflags! {

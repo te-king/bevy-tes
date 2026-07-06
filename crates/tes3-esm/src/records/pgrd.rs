@@ -1,8 +1,9 @@
 //! `PGRD` — a cell path grid.
 
 use crate::common::{
-    Subrecord, finish, flags, l1, le_i32, le_u8, le_u16, le_u32, parse_or_default, parse_struct,
+    Subrecord, finish, flags, l1, le_i32, le_u8, le_u16, le_u32, parse_or_default,
 };
+use crate::macros::parse_struct;
 use nom::multi::many0;
 use nom::{IResult, Parser};
 use tes_core::L1String;

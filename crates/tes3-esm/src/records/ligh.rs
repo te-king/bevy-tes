@@ -1,8 +1,7 @@
 //! `LIGH` — a light.
 
-use crate::common::{
-    Color, Subrecord, color, flags, l1, le_f32, le_i32, le_u32, parse_or_default, parse_struct,
-};
+use crate::common::{Color, Subrecord, color, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
+use crate::macros::parse_struct;
 use tes_core::L1String;
 
 bitflags::bitflags! {

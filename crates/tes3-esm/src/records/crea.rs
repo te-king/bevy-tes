@@ -1,9 +1,9 @@
 //! `CREA` — a creature.
 
 use crate::common::{
-    Subrecord, enum_field, enumeration, finish, fixed_l1str, flags, l1, le_f32, le_u32,
-    parse_or_default,
+    Subrecord, enumeration, finish, fixed_l1str, flags, l1, le_f32, le_u32, parse_or_default,
 };
+use crate::macros::enum_field;
 use crate::shared::{
     AiData, AiPackage, InventoryItem, TravelDestination, ai_activate, ai_data, ai_escort,
     ai_follow, ai_travel, ai_wander, inventory_item, travel_destination,

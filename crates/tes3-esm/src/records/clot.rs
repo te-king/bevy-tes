@@ -1,8 +1,7 @@
 //! `CLOT` — an item of clothing.
 
-use crate::common::{
-    Subrecord, enum_field, enumeration, l1, le_f32, le_u16, parse_or_default, parse_struct,
-};
+use crate::common::{Subrecord, enumeration, l1, le_f32, le_u16, parse_or_default};
+use crate::macros::{enum_field, parse_struct};
 use crate::shared::BipedItem;
 use tes_core::L1String;
 
