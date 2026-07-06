@@ -6,20 +6,28 @@
 //! Signed `i8` arrays are exposed as raw bytes (reinterpret with `as i8`), and the `u16`
 //! texture grid via [`Land::texture_indices`].
 
-use crate::common::{Subrecord, finish, le_f32, le_i32, le_u32};
+use crate::common::{Subrecord, finish, flags, le_f32, le_i32};
 use nom::IResult;
 
-/// Bit flags in the `DATA` field indicating which optional arrays are present.
-pub const LAND_HAS_HEIGHTS: u32 = 0x01; // VNML, VHGT, WNAM
-pub const LAND_HAS_COLORS: u32 = 0x02; // VCLR
-pub const LAND_HAS_TEXTURES: u32 = 0x04; // VTEX
+bitflags::bitflags! {
+    /// Landscape flags (`DATA`) indicating which optional arrays are present.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct LandFlags: u32 {
+        /// `VNML`, `VHGT`, `WNAM`.
+        const HAS_HEIGHTS = 0x01;
+        /// `VCLR`.
+        const HAS_COLORS = 0x02;
+        /// `VTEX`.
+        const HAS_TEXTURES = 0x04;
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Land {
     pub grid_x: i32,
     pub grid_y: i32,
-    /// Bitfield describing which arrays below are populated.
-    pub data_types: u32,
+    /// Which of the arrays below are populated.
+    pub data_types: LandFlags,
     /// 65×65×3 vertex normals (`VNML`), as raw signed bytes.
     pub normals: Option<Vec<u8>>,
     /// Per-cell height offset from `VHGT`.
@@ -59,7 +67,7 @@ impl Land {
                         out.grid_y = y;
                     }
                 }
-                b"DATA" => out.data_types = finish(le_u32(sub.data)).unwrap_or(0),
+                b"DATA" => out.data_types = finish(flags(sub.data)).unwrap_or_default(),
                 b"VNML" => out.normals = Some(sub.data.to_vec()),
                 b"VHGT" => {
                     if let Some((offset, heights)) = finish(vhgt(sub.data)) {

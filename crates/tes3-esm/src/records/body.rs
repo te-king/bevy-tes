@@ -1,25 +1,63 @@
 //! `BODY` — a body part.
 
-use crate::common::{Subrecord, l1, le_u8, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, flags, l1, le_u8, parse_or_default, parse_struct,
+};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Body part flags (`BYDT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct BodyPartFlags: u8 {
+        const FEMALE = 0x1;
+        const PLAYABLE = 0x2;
+    }
+}
+
+enum_field! {
+    /// Which body slot the part occupies (`BYDT`).
+    pub enum BodyPart: u8 {
+        Head = 0,
+        Hair = 1,
+        Neck = 2,
+        Chest = 3,
+        Groin = 4,
+        Hand = 5,
+        Wrist = 6,
+        Forearm = 7,
+        UpperArm = 8,
+        Foot = 9,
+        Ankle = 10,
+        Knee = 11,
+        UpperLeg = 12,
+        Clavicle = 13,
+        Tail = 14,
+    }
+}
+
+enum_field! {
+    /// What the part is made of (`BYDT`).
+    pub enum BodyPartKind: u8 {
+        Skin = 0,
+        Clothing = 1,
+        Armor = 2,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct BodyData {
-    /// Body part (0 = Head … 14 = Tail).
-    pub part: u8,
+    pub part: BodyPart,
     pub vampire: u8,
-    /// `0x1` = Female, `0x2` = Playable.
-    pub flags: u8,
-    /// 0 = Skin, 1 = Clothing, 2 = Armor.
-    pub part_type: u8,
+    pub flags: BodyPartFlags,
+    pub part_type: BodyPartKind,
 }
 
 parse_struct! {
     fn body_data -> BodyData {
-        part: le_u8,
+        part: enumeration,
         vampire: le_u8,
-        flags: le_u8,
-        part_type: le_u8,
+        flags: flags,
+        part_type: enumeration,
     }
 }
 

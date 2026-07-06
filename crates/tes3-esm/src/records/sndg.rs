@@ -1,13 +1,26 @@
 //! `SNDG` — a sound generator.
 
-use crate::common::{Subrecord, finish, l1, le_u32};
+use crate::common::{Subrecord, enum_field, enumeration, finish, l1};
 use tes_core::L1String;
+
+enum_field! {
+    /// Sound generator trigger (`DATA`).
+    pub enum SoundGenKind: u32 {
+        LeftFoot = 0,
+        RightFoot = 1,
+        SwimLeft = 2,
+        SwimRight = 3,
+        Moan = 4,
+        Roar = 5,
+        Scream = 6,
+        Land = 7,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sndg {
     pub id: L1String,
-    /// Sound type (0 = Left Foot … 7 = Land).
-    pub kind: u32,
+    pub kind: SoundGenKind,
     pub creature: Option<L1String>,
     /// Sound ID string.
     pub sound: Option<L1String>,
@@ -19,7 +32,7 @@ impl Sndg {
         for sub in subs {
             match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
-                b"DATA" => out.kind = finish(le_u32(sub.data)).unwrap_or(0),
+                b"DATA" => out.kind = finish(enumeration(sub.data)).unwrap_or_default(),
                 b"CNAM" => out.creature = Some(l1(sub.data)),
                 b"SNAM" => out.sound = Some(l1(sub.data)),
                 _ => {}

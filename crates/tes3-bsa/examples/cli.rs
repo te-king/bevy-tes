@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use tes3_bsa::Bsa;
 use tes3_esm::Plugin;
+use tes3_esm::records::tes3::HeaderFlags;
 
 /// Inspect Morrowind (TES3) data files.
 #[derive(Parser, Debug)]
@@ -91,7 +92,7 @@ fn run_esm(path: &Path) -> ExitCode {
     let h = &plugin.header;
     println!("File:        {}", path.display());
     println!("Version:     {}", h.version);
-    println!("Master flag: {}", h.flags & 0x1 != 0);
+    println!("Master flag: {}", h.flags.contains(HeaderFlags::MASTER));
     println!("Company:     {}", h.company);
     println!("Description: {}", h.description.decode().trim());
     println!("Declared records: {}", h.num_records);

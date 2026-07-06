@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use tes3_esm::records::tes3::HeaderFlags;
 use tes3_esm::{Plugin, Record};
 
 /// Read the file into an owned buffer to parse. The parsed `Plugin` owns its data, so it
@@ -21,7 +22,7 @@ fn header_is_decoded() {
     let plugin = Plugin::parse(&bytes).unwrap();
     assert_eq!(plugin.header.version, 1.2);
     assert!(
-        plugin.header.flags & 0x1 != 0,
+        plugin.header.flags.contains(HeaderFlags::MASTER),
         "ESM should be flagged master"
     );
     assert_eq!(plugin.header.company, "Bethesda Softworks"); // L1String: PartialEq<&str>

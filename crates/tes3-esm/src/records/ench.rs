@@ -1,25 +1,43 @@
 //! `ENCH` — an enchantment.
 
-use crate::common::{Subrecord, l1, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, flags, l1, le_u32, parse_or_default, parse_struct,
+};
 use crate::shared::{Effect, effect};
 use tes_core::L1String;
 
+bitflags::bitflags! {
+    /// Enchantment flags (`ENDT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct EnchantFlags: u32 {
+        const AUTOCALC = 0x1;
+    }
+}
+
+enum_field! {
+    /// Enchantment trigger (`ENDT`).
+    pub enum EnchantKind: u32 {
+        CastOnce = 0,
+        CastOnStrike = 1,
+        CastWhenUsed = 2,
+        ConstantEffect = 3,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct EnchantData {
-    /// 0 = Cast Once, 1 = Cast Strikes, 2 = Cast when Used, 3 = Constant Effect.
-    pub kind: u32,
+    pub kind: EnchantKind,
     pub cost: u32,
     pub charge: u32,
-    /// `0x1` = Autocalc.
-    pub flags: u32,
+    pub flags: EnchantFlags,
 }
 
 parse_struct! {
     fn enchant_data -> EnchantData {
-        kind: le_u32,
+        kind: enumeration,
         cost: le_u32,
         charge: le_u32,
-        flags: le_u32,
+        flags: flags,
     }
 }
 

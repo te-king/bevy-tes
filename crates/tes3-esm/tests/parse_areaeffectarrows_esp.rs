@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use tes3_esm::records::tes3::HeaderFlags;
 use tes3_esm::{Plugin, Record};
 
 /// The file is gitignored, locally supplied game data; `None` means skip the test.
@@ -20,9 +21,8 @@ fn header_is_v12_plugin() {
     let plugin = Plugin::parse(&bytes).unwrap();
     assert_eq!(plugin.header.version, 1.2);
     // The defining ESP-vs-ESM property: the master flag is clear (inverse of an ESM).
-    assert_eq!(
-        plugin.header.flags & 0x1,
-        0,
+    assert!(
+        !plugin.header.flags.contains(HeaderFlags::MASTER),
         "ESP should not be flagged master"
     );
     assert_eq!(plugin.header.num_records as usize, plugin.records.len() - 1);

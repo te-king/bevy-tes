@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+bitflags = { workspace = true }
 tes-core = { workspace = true }
 thiserror = { workspace = true }
 nom = { workspace = true }

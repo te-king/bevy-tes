@@ -1,14 +1,24 @@
 //! `DIAL` — a dialogue topic. The `INFO` records that follow it belong to it.
 
-use crate::common::{Subrecord, l1};
+use crate::common::{Subrecord, enum_field, l1};
 use tes_core::L1String;
+
+enum_field! {
+    /// Dialogue type (`DATA`). Shared with the INFO records that follow the topic.
+    pub enum DialogueKind: u8 {
+        Topic = 0,
+        Voice = 1,
+        Greeting = 2,
+        Persuasion = 3,
+        Journal = 4,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Dial {
     pub id: L1String,
-    /// Dialogue type: 0 = Topic, 1 = Voice, 2 = Greeting, 3 = Persuasion, 4 = Journal.
     /// `None` when the (rare) `DATA` field is absent.
-    pub kind: Option<u8>,
+    pub kind: Option<DialogueKind>,
 }
 
 impl Dial {
@@ -17,7 +27,7 @@ impl Dial {
         for sub in subs {
             match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
-                b"DATA" => out.kind = sub.data.first().copied(),
+                b"DATA" => out.kind = sub.data.first().map(|&b| DialogueKind::from(b)),
                 _ => {}
             }
         }

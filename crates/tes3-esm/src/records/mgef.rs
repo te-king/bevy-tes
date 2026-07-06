@@ -1,15 +1,39 @@
 //! `MGEF` — a magic effect.
 
-use crate::common::{Subrecord, finish, l1, le_f32, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, finish, flags, l1, le_f32, le_u32, parse_or_default,
+    parse_struct,
+};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Magic effect flags (`MEDT`). Only these bits are stored in the file; behavior
+    /// flags like Harmful are hardcoded per effect index in the engine.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct MagicEffectFlags: u32 {
+        const SPELLMAKING = 0x0200;
+        const ENCHANTING = 0x0400;
+        const NEGATIVE = 0x0800;
+    }
+}
+
+enum_field! {
+    /// Spell school (`MEDT`).
+    pub enum MagicSchool: u32 {
+        Alteration = 0,
+        Conjuration = 1,
+        Destruction = 2,
+        Illusion = 3,
+        Mysticism = 4,
+        Restoration = 5,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MagicEffectData {
-    /// Spell school (0 = Alteration … 5 = Restoration).
-    pub school: u32,
+    pub school: MagicSchool,
     pub base_cost: f32,
-    /// See record docs (Harmful, Targets Skill, etc.).
-    pub flags: u32,
+    pub flags: MagicEffectFlags,
     pub red: u32,
     pub green: u32,
     pub blue: u32,
@@ -20,9 +44,9 @@ pub struct MagicEffectData {
 
 parse_struct! {
     fn magic_effect_data -> MagicEffectData {
-        school: le_u32,
+        school: enumeration,
         base_cost: le_f32,
-        flags: le_u32,
+        flags: flags,
         red: le_u32,
         green: le_u32,
         blue: le_u32,

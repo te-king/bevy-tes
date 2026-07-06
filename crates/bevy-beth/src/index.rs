@@ -11,11 +11,9 @@
 use std::collections::HashMap;
 
 use tes3_esm::records::cell::Cell;
+use tes3_esm::records::cell::CellFlags;
 use tes3_esm::records::ligh::LightData;
 use tes3_esm::{L1Str, Plugin, Record};
-
-/// `CellData::flags` bit marking an interior cell.
-const CELL_INTERIOR: u32 = 0x01;
 
 /// Identifies a cell within a plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,7 +96,7 @@ impl EsmIndex {
         for (i, record) in plugin.records.iter().enumerate() {
             match record {
                 Record::Cell(cell) => {
-                    if cell.data.flags & CELL_INTERIOR != 0 {
+                    if cell.data.flags.contains(CellFlags::INTERIOR) {
                         index.interiors.insert(lower(&cell.name), i);
                     } else {
                         index
@@ -231,14 +229,14 @@ mod tests {
                 Record::Cell(Cell {
                     name: l1("Test Cell"),
                     data: CellData {
-                        flags: 0x01,
+                        flags: CellFlags::INTERIOR,
                         ..Default::default()
                     },
                     ..Default::default()
                 }),
                 Record::Cell(Cell {
                     data: CellData {
-                        flags: 0,
+                        flags: CellFlags::empty(),
                         grid_x: -3,
                         grid_y: 12,
                     },

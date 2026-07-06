@@ -1,6 +1,9 @@
 //! `CREA` — a creature.
 
-use crate::common::{Subrecord, finish, fixed_l1str, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{
+    Subrecord, enum_field, enumeration, finish, fixed_l1str, flags, l1, le_f32, le_u32,
+    parse_or_default,
+};
 use crate::shared::{
     AiData, AiPackage, InventoryItem, TravelDestination, ai_activate, ai_data, ai_escort,
     ai_follow, ai_travel, ai_wander, inventory_item, travel_destination,
@@ -8,10 +11,19 @@ use crate::shared::{
 use nom::IResult;
 use tes_core::L1String;
 
+enum_field! {
+    /// Creature type (`NPDT`).
+    pub enum CreatureKind: u32 {
+        Creature = 0,
+        Daedra = 1,
+        Undead = 2,
+        Humanoid = 3,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CreatureData {
-    /// 0 = Creature, 1 = Daedra, 2 = Undead, 3 = Humanoid.
-    pub kind: u32,
+    pub kind: CreatureKind,
     pub level: u32,
     /// Eight attributes, ordered by attribute ID.
     pub attributes: [u32; 8],
@@ -28,7 +40,7 @@ pub struct CreatureData {
 }
 
 fn creature_data(input: &[u8]) -> IResult<&[u8], CreatureData> {
-    let (input, kind) = le_u32(input)?;
+    let (input, kind) = enumeration(input)?;
     let (input, level) = le_u32(input)?;
     let mut input = input;
     let mut attributes = [0u32; 8];
@@ -72,6 +84,23 @@ fn creature_data(input: &[u8]) -> IResult<&[u8], CreatureData> {
     ))
 }
 
+bitflags::bitflags! {
+    /// Creature flags (`FLAG`). Bits above `0x80` encode the blood type (skeleton,
+    /// metal sparks, …) and are retained unnamed.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct CreatureFlags: u32 {
+        const BIPED = 0x01;
+        const RESPAWN = 0x02;
+        const WEAPON_AND_SHIELD = 0x04;
+        /// Set on every vanilla creature; meaning unknown.
+        const BASE = 0x08;
+        const SWIMS = 0x10;
+        const FLIES = 0x20;
+        const WALKS = 0x40;
+        const ESSENTIAL = 0x80;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Crea {
     pub id: L1String,
@@ -80,7 +109,7 @@ pub struct Crea {
     pub name: Option<L1String>,
     pub script: Option<L1String>,
     pub data: CreatureData,
-    pub flags: u32,
+    pub flags: CreatureFlags,
     pub scale: Option<f32>,
     pub inventory: Vec<InventoryItem>,
     pub spells: Vec<L1String>,
@@ -100,7 +129,7 @@ impl Crea {
                 b"FNAM" => out.name = Some(l1(sub.data)),
                 b"SCRI" => out.script = Some(l1(sub.data)),
                 b"NPDT" => out.data = parse_or_default(creature_data, sub.data),
-                b"FLAG" => out.flags = finish(le_u32(sub.data)).unwrap_or(0),
+                b"FLAG" => out.flags = finish(flags(sub.data)).unwrap_or_default(),
                 b"XSCL" => out.scale = finish(le_f32(sub.data)),
                 b"NPCO" => out
                     .inventory

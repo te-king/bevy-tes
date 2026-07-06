@@ -1,8 +1,17 @@
 //! `TES3` — the plugin/master file header (always the first record).
 
-use crate::common::{Subrecord, finish, fixed_l1str, l1, le_f32, le_u32, le_u64};
+use crate::common::{Subrecord, finish, fixed_l1str, flags, l1, le_f32, le_u32, le_u64};
 use nom::IResult;
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Plugin header flags (`HEDR`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct HeaderFlags: u32 {
+        /// The file is treated as a master regardless of its extension.
+        const MASTER = 0x1;
+    }
+}
 
 /// A master file this plugin depends on (a `MAST`/`DATA` pair).
 #[derive(Debug, Clone, PartialEq)]
@@ -17,8 +26,7 @@ pub struct Master {
 pub struct Tes3 {
     /// File format version (1.2 for Morrowind, 1.3 for Tribunal/Bloodmoon).
     pub version: f32,
-    /// Header flags; `0x1` means the file is treated as a master regardless of extension.
-    pub flags: u32,
+    pub flags: HeaderFlags,
     pub company: L1String,
     pub description: L1String,
     /// Number of records following this header.
@@ -27,12 +35,12 @@ pub struct Tes3 {
 }
 
 /// Decoded `HEDR` fields: (version, flags, company, description, record count).
-type HedrFields = (f32, u32, L1String, L1String, u32);
+type HedrFields = (f32, HeaderFlags, L1String, L1String, u32);
 
 /// Parse the 300-byte `HEDR` payload.
 fn hedr(input: &[u8]) -> IResult<&[u8], HedrFields> {
     let (input, version) = le_f32(input)?;
-    let (input, flags) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
     let (input, company) = fixed_l1str(32)(input)?;
     let (input, description) = fixed_l1str(256)(input)?;
     let (input, num_records) = le_u32(input)?;

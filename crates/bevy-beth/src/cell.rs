@@ -42,17 +42,11 @@ use bevy::mesh::{Mesh, Mesh3d};
 use bevy::pbr::{MeshMaterial3d, StandardMaterial};
 use bevy::transform::components::Transform;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
-use tes3_esm::records::cell::{Cell, Reference};
+use tes3_esm::records::cell::{Cell, CellFlags, Reference};
+use tes3_esm::records::ligh::LightFlags;
 
 use crate::index::{CellId, ObjectKind};
 use crate::{EsmAsset, TesVfsHandle, convert};
-
-/// `CellData::flags` bit marking a cell that has water.
-const CELL_HAS_WATER: u32 = 0x02;
-/// `LightData::flags`: light subtracts instead of adding.
-const LIGHT_NEGATIVE: u32 = 0x0004;
-/// `LightData::flags`: light starts switched off.
-const LIGHT_OFF_BY_DEFAULT: u32 = 0x0020;
 
 /// Point-light lumens per game-unit² of `LightData::radius`. A documented heuristic, not
 /// game data: Morrowind's fixed-function attenuation doesn't translate to physical
@@ -269,7 +263,9 @@ impl CellSpawner<'_, '_, '_> {
 
         if info.kind == ObjectKind::Light
             && let Some(light) = &info.light
-            && light.flags & (LIGHT_NEGATIVE | LIGHT_OFF_BY_DEFAULT) == 0
+            && !light
+                .flags
+                .intersects(LightFlags::NEGATIVE | LightFlags::OFF_BY_DEFAULT)
         {
             let radius = light.radius as f32;
             child.insert(PointLight {
@@ -288,7 +284,7 @@ impl CellSpawner<'_, '_, '_> {
 fn environment(cell: &Cell) -> CellEnvironment {
     let srgb = |c: tes_core::math::Color| Color::srgb_u8(c.r, c.g, c.b);
     CellEnvironment {
-        interior: cell.data.flags & 0x01 != 0,
+        interior: cell.data.flags.contains(CellFlags::INTERIOR),
         ambient: cell.ambient.map(|a| srgb(a.ambient)),
         sunlight: cell.ambient.map(|a| srgb(a.sunlight)),
         fog: cell.ambient.map(|a| (srgb(a.fog), a.fog_density)),
@@ -307,8 +303,8 @@ fn spawn_water(
     cell: &Cell,
     center: Vec3,
 ) {
-    let interior = cell.data.flags & 0x01 != 0;
-    let has_water = cell.data.flags & CELL_HAS_WATER != 0 || cell.water_height.is_some();
+    let interior = cell.data.flags.contains(CellFlags::INTERIOR);
+    let has_water = cell.data.flags.contains(CellFlags::HAS_WATER) || cell.water_height.is_some();
     if !interior || !has_water {
         return;
     }

@@ -1,7 +1,18 @@
 //! `LEVI` — a leveled item list.
 
-use crate::common::{Subrecord, finish, l1, le_u16, le_u32};
+use crate::common::{Subrecord, finish, flags, l1, le_u16};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Leveled item list flags (`DATA`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct LeveledItemFlags: u32 {
+        /// Roll separately for each item produced by a count.
+        const CALC_EACH_ITEM = 0x1;
+        /// Draw from all levels ≤ the PC's level, not just the highest.
+        const CALC_ALL_LEVELS = 0x2;
+    }
+}
 
 /// One entry in a leveled list: an item ID and the PC level it becomes available at.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -13,8 +24,7 @@ pub struct LeveledItem {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Levi {
     pub id: L1String,
-    /// `0x1` = calc for each item in count, `0x2` = calc from all levels ≤ PC level.
-    pub flags: u32,
+    pub flags: LeveledItemFlags,
     /// Chance that nothing is produced.
     pub chance_none: u8,
     pub items: Vec<LeveledItem>,
@@ -26,7 +36,7 @@ impl Levi {
         for sub in subs {
             match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
-                b"DATA" => out.flags = finish(le_u32(sub.data)).unwrap_or(0),
+                b"DATA" => out.flags = finish(flags(sub.data)).unwrap_or_default(),
                 b"NNAM" => out.chance_none = sub.data.first().copied().unwrap_or(0),
                 b"INDX" => {} // Count of following items; recoverable from `items.len()`.
                 b"INAM" => out.items.push(LeveledItem {

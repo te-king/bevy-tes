@@ -28,6 +28,7 @@ use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
 use clap::Parser;
 
 use bevy_beth::{BethPlugin, EsmAsset};
+use tes3_esm::records::tes3::HeaderFlags;
 
 /// Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` and print a summary.
 #[derive(Parser, Debug)]
@@ -123,7 +124,10 @@ fn print_summary(path: &str, asset: &EsmAsset) {
     let h = &asset.plugin.header;
     println!("Loaded {path} via Bevy AssetServer");
     println!("  version:          {}", h.version);
-    println!("  master flag:      {}", h.flags & 0x1 != 0);
+    println!(
+        "  master flag:      {}",
+        h.flags.contains(HeaderFlags::MASTER)
+    );
     println!("  company:          {}", h.company);
     println!("  declared records: {}", h.num_records);
     if !h.masters.is_empty() {

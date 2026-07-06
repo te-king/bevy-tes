@@ -1,20 +1,21 @@
 //! `SKIL` — a character skill.
 
-use crate::common::{Subrecord, finish, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{Subrecord, enumeration, finish, l1, le_f32, le_u32, parse_or_default};
+use crate::shared::Specialization;
 use nom::IResult;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SkillData {
     pub attribute: u32,
-    pub specialization: u32,
+    pub specialization: Specialization,
     /// Four use values that grant skill experience.
     pub use_values: [f32; 4],
 }
 
 fn skill_data(input: &[u8]) -> IResult<&[u8], SkillData> {
     let (input, attribute) = le_u32(input)?;
-    let (input, specialization) = le_u32(input)?;
+    let (input, specialization) = enumeration(input)?;
     let mut input = input;
     let mut use_values = [0f32; 4];
     for slot in use_values.iter_mut() {

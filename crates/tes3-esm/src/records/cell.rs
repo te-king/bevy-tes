@@ -6,23 +6,35 @@
 //! "moved references" (`MVRF`-led) recording objects relocated from another cell.
 
 use crate::common::{
-    Color, Subrecord, color, finish, l1, le_f32, le_i32, le_u32, parse_or_default, parse_struct,
+    Color, Subrecord, color, finish, flags, l1, le_f32, le_i32, le_u32, parse_or_default,
+    parse_struct,
 };
 use crate::shared::{AmbientLight, TravelDestination, ambient_light, travel_destination};
 use nom::IResult;
 use tes_core::L1String;
 
+bitflags::bitflags! {
+    /// Cell flags (`DATA`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct CellFlags: u32 {
+        const INTERIOR = 0x01;
+        const HAS_WATER = 0x02;
+        const SLEEP_ILLEGAL = 0x04;
+        /// Interior that behaves like an exterior (sky, sunlight).
+        const BEHAVES_LIKE_EXTERIOR = 0x80;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CellData {
-    /// `0x01` = Interior, `0x02` = Has Water, `0x04` = No Sleeping, `0x80` = like exterior.
-    pub flags: u32,
+    pub flags: CellFlags,
     pub grid_x: i32,
     pub grid_y: i32,
 }
 
 parse_struct! {
     fn cell_data -> CellData {
-        flags: le_u32,
+        flags: flags,
         grid_x: le_i32,
         grid_y: le_i32,
     }

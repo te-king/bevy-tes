@@ -1,12 +1,23 @@
 //! `APPA` — an alchemy apparatus.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, enum_field, enumeration, l1, le_f32, le_u32, parse_or_default, parse_struct,
+};
 use tes_core::L1String;
+
+enum_field! {
+    /// Apparatus type (`AADT`).
+    pub enum ApparatusKind: u32 {
+        MortarAndPestle = 0,
+        Alembic = 1,
+        Calcinator = 2,
+        Retort = 3,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ApparatusData {
-    /// 0 = Mortar and Pestle, 1 = Alembic, 2 = Calcinator, 3 = Retort.
-    pub kind: u32,
+    pub kind: ApparatusKind,
     pub quality: f32,
     pub weight: f32,
     pub value: u32,
@@ -14,7 +25,7 @@ pub struct ApparatusData {
 
 parse_struct! {
     fn apparatus_data -> ApparatusData {
-        kind: le_u32,
+        kind: enumeration,
         quality: le_f32,
         weight: le_f32,
         value: le_u32,
