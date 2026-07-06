@@ -1,8 +1,17 @@
 //! `RACE` — a character race.
 
-use crate::common::{Subrecord, l1, le_f32, le_i32, le_u32, parse_or_default};
+use crate::common::{Subrecord, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
 use nom::IResult;
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Race flags (`RADT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct RaceFlags: u32 {
+        const PLAYABLE = 0x1;
+        const BEAST = 0x2;
+    }
+}
 
 /// A skill bonus granted by the race (skill ID + bonus amount).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -21,8 +30,7 @@ pub struct RaceData {
     pub height: [f32; 2],
     /// Weight per gender.
     pub weight: [f32; 2],
-    /// `0x1` = Playable, `0x2` = Beast Race.
-    pub flags: u32,
+    pub flags: RaceFlags,
 }
 
 fn race_data(input: &[u8]) -> IResult<&[u8], RaceData> {
@@ -45,7 +53,7 @@ fn race_data(input: &[u8]) -> IResult<&[u8], RaceData> {
     let (input, hf) = le_f32(input)?;
     let (input, wm) = le_f32(input)?;
     let (input, wf) = le_f32(input)?;
-    let (input, flags) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
     Ok((
         input,
         RaceData {

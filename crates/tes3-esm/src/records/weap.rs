@@ -1,7 +1,18 @@
 //! `WEAP` — a weapon.
 
-use crate::common::{Subrecord, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default, parse_struct};
+use crate::common::{
+    Subrecord, flags, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default, parse_struct,
+};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Weapon flags (`WPDT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct WeaponFlags: u32 {
+        const IGNORE_NORMAL_WEAPON_RESISTANCE = 0x1;
+        const SILVER = 0x2;
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct WeaponData {
@@ -19,8 +30,7 @@ pub struct WeaponData {
     pub slash_max: u8,
     pub thrust_min: u8,
     pub thrust_max: u8,
-    /// `0x1` = ignore normal weapon resistance, `0x2` = silver.
-    pub flags: u32,
+    pub flags: WeaponFlags,
 }
 
 parse_struct! {
@@ -38,7 +48,7 @@ parse_struct! {
         slash_max: le_u8,
         thrust_min: le_u8,
         thrust_max: le_u8,
-        flags: le_u32,
+        flags: flags,
     }
 }
 

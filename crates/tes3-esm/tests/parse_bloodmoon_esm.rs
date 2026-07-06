@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use tes3_esm::records::tes3::HeaderFlags;
 use tes3_esm::{Plugin, Record};
 
 /// The file is gitignored, locally supplied game data; `None` means skip the test.
@@ -20,7 +21,7 @@ fn header_is_v13_master() {
     // Bloodmoon bumps the format version to 1.3 (Morrowind.esm is 1.2).
     assert_eq!(plugin.header.version, 1.3);
     assert!(
-        plugin.header.flags & 0x1 != 0,
+        plugin.header.flags.contains(HeaderFlags::MASTER),
         "ESM should be flagged master"
     );
     assert_eq!(plugin.header.num_records as usize, plugin.records.len() - 1);

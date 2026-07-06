@@ -1,6 +1,6 @@
 //! `NPC_` — a non-player character.
 
-use crate::common::{Subrecord, finish, fixed_l1str, l1, le_u16, le_u32, parse_or_default};
+use crate::common::{Subrecord, finish, fixed_l1str, flags, l1, le_u16, le_u32, parse_or_default};
 use crate::shared::{
     AiData, AiPackage, InventoryItem, TravelDestination, ai_activate, ai_data, ai_escort,
     ai_follow, ai_travel, ai_wander, inventory_item, travel_destination,
@@ -106,6 +106,20 @@ fn npc_full(input: &[u8]) -> IResult<&[u8], NpcStats> {
     ))
 }
 
+bitflags::bitflags! {
+    /// NPC flags (`FLAG`). Bits above `0x10` encode the blood type and are retained
+    /// unnamed.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct NpcFlags: u32 {
+        const FEMALE = 0x01;
+        const ESSENTIAL = 0x02;
+        const RESPAWN = 0x04;
+        /// Set on every vanilla NPC; meaning unknown.
+        const BASE = 0x08;
+        const AUTOCALC = 0x10;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Npc {
     pub id: L1String,
@@ -118,8 +132,7 @@ pub struct Npc {
     pub hair_model: Option<L1String>,
     pub script: Option<L1String>,
     pub stats: NpcStats,
-    /// `0x1` = Female, `0x2` = Essential, `0x10` = Autocalc, etc.
-    pub flags: u32,
+    pub flags: NpcFlags,
     pub inventory: Vec<InventoryItem>,
     pub spells: Vec<L1String>,
     pub ai_data: Option<AiData>,
@@ -152,7 +165,7 @@ impl Npc {
                         out.stats = stats;
                     }
                 }
-                b"FLAG" => out.flags = finish(le_u32(sub.data)).unwrap_or(0),
+                b"FLAG" => out.flags = finish(flags(sub.data)).unwrap_or_default(),
                 b"NPCO" => out
                     .inventory
                     .push(parse_or_default(inventory_item, sub.data)),

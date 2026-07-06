@@ -1,15 +1,23 @@
 //! `BODY` — a body part.
 
-use crate::common::{Subrecord, l1, le_u8, parse_or_default, parse_struct};
+use crate::common::{Subrecord, flags, l1, le_u8, parse_or_default, parse_struct};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Body part flags (`BYDT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct BodyPartFlags: u8 {
+        const FEMALE = 0x1;
+        const PLAYABLE = 0x2;
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct BodyData {
     /// Body part (0 = Head … 14 = Tail).
     pub part: u8,
     pub vampire: u8,
-    /// `0x1` = Female, `0x2` = Playable.
-    pub flags: u8,
+    pub flags: BodyPartFlags,
     /// 0 = Skin, 1 = Clothing, 2 = Armor.
     pub part_type: u8,
 }
@@ -18,7 +26,7 @@ parse_struct! {
     fn body_data -> BodyData {
         part: le_u8,
         vampire: le_u8,
-        flags: le_u8,
+        flags: flags,
         part_type: le_u8,
     }
 }

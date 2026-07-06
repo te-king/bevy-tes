@@ -1,8 +1,16 @@
 //! `FACT` — a faction.
 
-use crate::common::{Subrecord, finish, l1, le_i32, le_u32, parse_or_default};
+use crate::common::{Subrecord, finish, flags, l1, le_i32, le_u32, parse_or_default};
 use nom::IResult;
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Faction flags (`FADT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct FactionFlags: u32 {
+        const HIDDEN_FROM_PLAYER = 0x1;
+    }
+}
 
 /// Per-rank requirements within a faction (part of the `FADT` struct).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -19,8 +27,7 @@ pub struct FactionData {
     pub ranks: [RankData; 10],
     /// Seven favored skill IDs (`-1` to ignore).
     pub skills: [i32; 7],
-    /// `0x1` = Hidden from player.
-    pub flags: u32,
+    pub flags: FactionFlags,
 }
 
 fn rank_data(input: &[u8]) -> IResult<&[u8], RankData> {
@@ -56,7 +63,7 @@ fn faction_data(input: &[u8]) -> IResult<&[u8], FactionData> {
         *skill = s;
         input = rest;
     }
-    let (input, flags) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
     Ok((
         input,
         FactionData {

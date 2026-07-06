@@ -1,22 +1,29 @@
 //! `ALCH` — a potion or other alchemy item.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default, parse_struct};
+use crate::common::{Subrecord, flags, l1, le_f32, le_u32, parse_or_default, parse_struct};
 use crate::shared::{Effect, effect};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Alchemy item flags (`ALDT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct AlchemyFlags: u32 {
+        const AUTOCALC = 0x1;
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct AlchemyData {
     pub weight: f32,
     pub value: u32,
-    /// `0x1` = autocalc.
-    pub flags: u32,
+    pub flags: AlchemyFlags,
 }
 
 parse_struct! {
     fn alchemy_data -> AlchemyData {
         weight: le_f32,
         value: le_u32,
-        flags: le_u32,
+        flags: flags,
     }
 }
 

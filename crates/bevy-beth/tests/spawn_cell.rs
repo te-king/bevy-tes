@@ -13,7 +13,7 @@ use bevy::light::PointLight;
 use bevy::math::{Quat, Vec3};
 use bevy::transform::components::Transform;
 use bevy::world_serialization::WorldAssetRoot;
-use tes3_esm::records::cell::{Cell, CellData, Reference, ReferenceTransform};
+use tes3_esm::records::cell::{Cell, CellData, CellFlags, Reference, ReferenceTransform};
 use tes3_esm::records::crea::Crea;
 use tes3_esm::records::ligh::{Ligh, LightData};
 use tes3_esm::records::stat::Stat;
@@ -67,7 +67,7 @@ fn synthetic_asset() -> EsmAsset {
             Record::Cell(Cell {
                 name: l1("Test Cell"),
                 data: CellData {
-                    flags: 0x01 | 0x02, // interior, has water
+                    flags: CellFlags::INTERIOR | CellFlags::HAS_WATER,
                     ..Default::default()
                 },
                 water_height: Some(50.0),
@@ -98,7 +98,11 @@ fn synthetic_asset() -> EsmAsset {
 
 /// Pump the app until the seed resolves (spawned or failed), up to a frame budget.
 fn pump_until_settled(app: &mut bevy::app::App, seed: bevy::ecs::entity::Entity) {
-    for _ in 0..100 {
+    // Generous deadline: seeding can precede the ESM load, and parsing the full game
+    // master on the IO pool takes seconds in a debug build. Exits as soon as the seed
+    // resolves, so tests against synthetic (pre-inserted) assets return immediately.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
         app.update();
         let entity = app.world().entity(seed);
         if entity.contains::<CellSpawned>() || entity.contains::<CellSpawnFailed>() {
@@ -306,7 +310,9 @@ fn exterior_cell_spawns_references() {
             .records
             .iter()
             .find_map(|r| match r {
-                Record::Cell(c) if c.data.flags & 0x01 == 0 && c.references.len() > 20 => {
+                Record::Cell(c)
+                    if !c.data.flags.contains(CellFlags::INTERIOR) && c.references.len() > 20 =>
+                {
                     Some((c.data.grid_x, c.data.grid_y))
                 }
                 _ => None,

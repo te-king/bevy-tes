@@ -5,10 +5,36 @@
 //! String-bearing types own their text as [`L1String`](crate::L1String) (decoded on
 //! demand); purely numeric types ([`Effect`], [`AiData`], [`AmbientLight`]) are `Copy`.
 
-use super::common::{Color, color, fixed_l1str, parse_struct};
+use super::common::{Color, color, fixed_l1str, flags, parse_struct};
 use nom::IResult;
 use nom::number::complete::{le_f32, le_i8, le_i32, le_u8, le_u16, le_u32};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Services offered by an actor or auto-calculated for a class. Shared by the
+    /// `AIDT` flags (CREA/NPC_) and the CLAS auto-calc field, which use the same layout.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct ServiceFlags: u32 {
+        const BARTERS_WEAPONS = 0x0000_0001;
+        const BARTERS_ARMOR = 0x0000_0002;
+        const BARTERS_CLOTHING = 0x0000_0004;
+        const BARTERS_BOOKS = 0x0000_0008;
+        const BARTERS_INGREDIENTS = 0x0000_0010;
+        const BARTERS_PICKS = 0x0000_0020;
+        const BARTERS_PROBES = 0x0000_0040;
+        const BARTERS_LIGHTS = 0x0000_0080;
+        const BARTERS_APPARATUS = 0x0000_0100;
+        const BARTERS_REPAIR_ITEMS = 0x0000_0200;
+        const BARTERS_MISC = 0x0000_0400;
+        const BARTERS_SPELLS = 0x0000_0800;
+        const BARTERS_MAGIC_ITEMS = 0x0000_1000;
+        const BARTERS_POTIONS = 0x0000_2000;
+        const OFFERS_TRAINING = 0x0000_4000;
+        const OFFERS_SPELLMAKING = 0x0000_8000;
+        const OFFERS_ENCHANTING = 0x0001_0000;
+        const OFFERS_REPAIR = 0x0002_0000;
+    }
+}
 
 /// A single magic effect entry (`ENAM`, 24 bytes). Shared by SPEL, ENCH and ALCH.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -62,8 +88,7 @@ pub struct AiData {
     pub fight: u8,
     pub flee: u8,
     pub alarm: u8,
-    /// Services offered / auto-calc flags (see record docs).
-    pub flags: u32,
+    pub flags: ServiceFlags,
 }
 
 pub fn ai_data(input: &[u8]) -> IResult<&[u8], AiData> {
@@ -73,7 +98,7 @@ pub fn ai_data(input: &[u8]) -> IResult<&[u8], AiData> {
     let (input, flee) = le_u8(input)?;
     let (input, alarm) = le_u8(input)?;
     let (input, _pad) = nom::bytes::complete::take(3usize)(input)?;
-    let (input, flags) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
     Ok((
         input,
         AiData {

@@ -1,9 +1,26 @@
 //! `LIGH` — a light.
 
 use crate::common::{
-    Color, Subrecord, color, l1, le_f32, le_i32, le_u32, parse_or_default, parse_struct,
+    Color, Subrecord, color, flags, l1, le_f32, le_i32, le_u32, parse_or_default, parse_struct,
 };
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Light behavior flags (`LHDT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct LightFlags: u32 {
+        const DYNAMIC = 0x0001;
+        const CAN_CARRY = 0x0002;
+        /// Darkens instead of illuminating.
+        const NEGATIVE = 0x0004;
+        const FLICKER = 0x0008;
+        const FIRE = 0x0010;
+        const OFF_BY_DEFAULT = 0x0020;
+        const FLICKER_SLOW = 0x0040;
+        const PULSE = 0x0080;
+        const PULSE_SLOW = 0x0100;
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct LightData {
@@ -12,8 +29,7 @@ pub struct LightData {
     pub time: i32,
     pub radius: u32,
     pub color: Color,
-    /// See record docs (Dynamic, Carry, Fire, Flicker, …).
-    pub flags: u32,
+    pub flags: LightFlags,
 }
 
 parse_struct! {
@@ -23,7 +39,7 @@ parse_struct! {
         time: le_i32,
         radius: le_u32,
         color: color,
-        flags: le_u32,
+        flags: flags,
     }
 }
 

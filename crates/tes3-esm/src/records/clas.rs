@@ -1,8 +1,17 @@
 //! `CLAS` — a character class.
 
-use crate::common::{Subrecord, l1, le_u32, parse_or_default};
+use crate::common::{Subrecord, flags, l1, le_u32, parse_or_default};
+use crate::shared::ServiceFlags;
 use nom::IResult;
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Class flags (`CLDT`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct ClassFlags: u32 {
+        const PLAYABLE = 0x1;
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ClassData {
@@ -12,10 +21,9 @@ pub struct ClassData {
     pub specialization: u32,
     /// Five (minor, major) skill pairs.
     pub skills: [[u32; 2]; 5],
-    /// `0x1` = Playable.
-    pub flags: u32,
-    /// Services available for auto-calc / bartering (bitfield).
-    pub autocalc_flags: u32,
+    pub flags: ClassFlags,
+    /// Services available for auto-calc / bartering.
+    pub autocalc_flags: ServiceFlags,
 }
 
 fn class_data(input: &[u8]) -> IResult<&[u8], ClassData> {
@@ -30,15 +38,15 @@ fn class_data(input: &[u8]) -> IResult<&[u8], ClassData> {
         *pair = [minor, major];
         input = rest;
     }
-    let (input, flags) = le_u32(input)?;
-    let (input, autocalc_flags) = le_u32(input)?;
+    let (input, class_flags) = flags(input)?;
+    let (input, autocalc_flags) = flags(input)?;
     Ok((
         input,
         ClassData {
             primary_attributes: [p0, p1],
             specialization,
             skills,
-            flags,
+            flags: class_flags,
             autocalc_flags,
         },
     ))

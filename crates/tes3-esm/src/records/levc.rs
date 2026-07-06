@@ -1,7 +1,16 @@
 //! `LEVC` — a leveled creature list.
 
-use crate::common::{Subrecord, finish, l1, le_u16, le_u32};
+use crate::common::{Subrecord, finish, flags, l1, le_u16};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Leveled creature list flags (`DATA`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct LeveledCreatureFlags: u32 {
+        /// Draw from all levels ≤ the PC's level, not just the highest.
+        const CALC_ALL_LEVELS = 0x1;
+    }
+}
 
 /// One entry in a leveled creature list.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -13,8 +22,7 @@ pub struct LeveledCreature {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Levc {
     pub id: L1String,
-    /// `0x1` = calc from all levels ≤ PC level.
-    pub flags: u32,
+    pub flags: LeveledCreatureFlags,
     pub chance_none: u8,
     pub creatures: Vec<LeveledCreature>,
 }
@@ -25,7 +33,7 @@ impl Levc {
         for sub in subs {
             match &sub.tag.0 {
                 b"NAME" => out.id = l1(sub.data),
-                b"DATA" => out.flags = finish(le_u32(sub.data)).unwrap_or(0),
+                b"DATA" => out.flags = finish(flags(sub.data)).unwrap_or_default(),
                 b"NNAM" => out.chance_none = sub.data.first().copied().unwrap_or(0),
                 b"INDX" => {} // Count of following creatures; recoverable from len().
                 b"CNAM" => out.creatures.push(LeveledCreature {

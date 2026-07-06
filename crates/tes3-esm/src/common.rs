@@ -104,32 +104,51 @@ macro_rules! parse_struct {
 }
 pub(crate) use parse_struct;
 
-/// Bitflags found in a record header's flags field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct RecordFlags(pub u32);
+bitflags::bitflags! {
+    /// Bitflags found in a record header's flags field.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct RecordFlags: u32 {
+        const DELETED = 0x0000_0020;
+        const PERSISTENT = 0x0000_0400;
+        const INITIALLY_DISABLED = 0x0000_0800;
+        const BLOCKED = 0x0000_2000;
+    }
+}
 
-impl RecordFlags {
-    pub const DELETED: u32 = 0x0000_0020;
-    pub const PERSISTENT: u32 = 0x0000_0400;
-    pub const INITIALLY_DISABLED: u32 = 0x0000_0800;
-    pub const BLOCKED: u32 = 0x0000_2000;
+/// The integer widths a flags subrecord field can be stored as, tying each width to its
+/// little-endian parser so [`flags`] can be generic over the bitflags type.
+pub trait FlagBits: bitflags::Bits {
+    fn parse_le(input: &[u8]) -> IResult<&[u8], Self>;
+}
 
-    pub fn contains(self, bit: u32) -> bool {
-        self.0 & bit != 0
+impl FlagBits for u8 {
+    fn parse_le(input: &[u8]) -> IResult<&[u8], u8> {
+        le_u8(input)
     }
+}
 
-    pub fn is_deleted(self) -> bool {
-        self.contains(Self::DELETED)
+impl FlagBits for u16 {
+    fn parse_le(input: &[u8]) -> IResult<&[u8], u16> {
+        le_u16(input)
     }
-    pub fn is_persistent(self) -> bool {
-        self.contains(Self::PERSISTENT)
+}
+
+impl FlagBits for u32 {
+    fn parse_le(input: &[u8]) -> IResult<&[u8], u32> {
+        le_u32(input)
     }
-    pub fn is_initially_disabled(self) -> bool {
-        self.contains(Self::INITIALLY_DISABLED)
-    }
-    pub fn is_blocked(self) -> bool {
-        self.contains(Self::BLOCKED)
-    }
+}
+
+/// Parse a little-endian integer into a typed [`bitflags`] value; the flags type (and so
+/// the integer width) is inferred from the destination field. Unknown bits are retained
+/// verbatim (`from_bits_retain`), so undocumented data survives parsing untouched.
+pub fn flags<F>(input: &[u8]) -> IResult<&[u8], F>
+where
+    F: bitflags::Flags,
+    F::Bits: FlagBits,
+{
+    let (input, bits) = F::Bits::parse_le(input)?;
+    Ok((input, F::from_bits_retain(bits)))
 }
 
 /// The 16-byte record header that precedes every record's data block.
@@ -159,14 +178,14 @@ pub fn record_header(input: &[u8]) -> IResult<&[u8], RecordHeader> {
     let (input, tag) = tag(input)?;
     let (input, size) = le_u32(input)?;
     let (input, unused) = le_u32(input)?;
-    let (input, flags) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
     Ok((
         input,
         RecordHeader {
             tag,
             size,
             unused,
-            flags: RecordFlags(flags),
+            flags,
         },
     ))
 }
@@ -227,7 +246,7 @@ mod tests {
         assert_eq!(hdr.tag, *b"TES3");
         assert_eq!(hdr.tag.to_string(), "TES3");
         assert_eq!(hdr.size, 0x134);
-        assert_eq!(hdr.flags, RecordFlags(0));
+        assert_eq!(hdr.flags, RecordFlags::empty());
     }
 
     #[test]

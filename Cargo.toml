@@ -17,6 +17,7 @@ tes-nif = { path = "crates/tes-nif" }
 tes-testdata = { path = "crates/tes-testdata" }
 
 # Third-party.
+bitflags = "2"
 nom = "8"
 thiserror = "2"
 bevy = { version = "0.19", default-features = false, features = ["bevy_asset"] }

@@ -1,8 +1,18 @@
 //! `CONT` — a container.
 
-use crate::common::{Subrecord, finish, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{Subrecord, finish, flags, l1, le_f32, parse_or_default};
 use crate::shared::{InventoryItem, inventory_item};
 use tes_core::L1String;
+
+bitflags::bitflags! {
+    /// Container flags (`FLAG`). Bit `0x8` is undocumented but set on every vanilla
+    /// container; it is retained unnamed.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct ContainerFlags: u32 {
+        const ORGANIC = 0x1;
+        const RESPAWNS = 0x2;
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Cont {
@@ -10,8 +20,7 @@ pub struct Cont {
     pub model: L1String,
     pub name: Option<L1String>,
     pub weight: f32,
-    /// `0x1` = Organic, `0x2` = Respawns, `0x8` = Unknown (always set).
-    pub flags: u32,
+    pub flags: ContainerFlags,
     pub items: Vec<InventoryItem>,
     pub script: Option<L1String>,
 }
@@ -25,7 +34,7 @@ impl Cont {
                 b"MODL" => out.model = l1(sub.data),
                 b"FNAM" => out.name = Some(l1(sub.data)),
                 b"CNDT" => out.weight = finish(le_f32(sub.data)).unwrap_or(0.0),
-                b"FLAG" => out.flags = finish(le_u32(sub.data)).unwrap_or(0),
+                b"FLAG" => out.flags = finish(flags(sub.data)).unwrap_or_default(),
                 b"NPCO" => out.items.push(parse_or_default(inventory_item, sub.data)),
                 b"SCRI" => out.script = Some(l1(sub.data)),
                 _ => {}

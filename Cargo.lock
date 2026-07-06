@@ -4696,6 +4696,7 @@ dependencies = [
 name = "tes3-esm"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.13.0",
  "nom",
  "tes-core",
  "tes-testdata",
