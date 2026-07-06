@@ -90,9 +90,7 @@ fn parse_block_inner(r: &mut Reader, ty: &str) -> Result<Block, Option<ReadError
             Block::Other
         }
 
-        "NiTexturingProperty" => Block::TexturingProperty(TexturingProperty {
-            base_texture: texturing_property(r)?,
-        }),
+        "NiTexturingProperty" => Block::TexturingProperty(texturing_property(r)?),
         "NiMaterialProperty" => Block::MaterialProperty(material_property(r)?),
         "NiAlphaProperty" => {
             ni_object_net(r)?;
@@ -601,21 +599,23 @@ fn material_property(r: &mut Reader) -> RResult<Material> {
     })
 }
 
-/// `NiTexturingProperty`: walk past flags, apply mode and the texture descriptors, returning
-/// the reference of the base (slot 0) texture's `NiSourceTexture` (or [`BlockRef::NONE`] if
-/// unused).
-fn texturing_property(r: &mut Reader) -> RResult<BlockRef> {
+/// `NiTexturingProperty`: walk past flags, apply mode and the texture descriptors, keeping
+/// the `NiSourceTexture` references of the slots the crate models — base (slot 0) and glow
+/// (slot 4). Unused slots stay [`BlockRef::NONE`].
+fn texturing_property(r: &mut Reader) -> RResult<TexturingProperty> {
     ni_object_net(r)?;
     r.u16()?; // flags
     r.u32()?; // apply mode
     let texture_count = r.u32()? as usize;
-    let mut base_texture = BlockRef::NONE;
+    let mut prop = TexturingProperty::default();
     for slot in 0..texture_count {
         if r.boolean()? {
             // TexDesc: source ref + clamp + filter + uv set + ps2 l/k + unknown1
             let source = r.block_ref()?;
-            if slot == 0 {
-                base_texture = source;
+            match slot {
+                0 => prop.base_texture = source,
+                4 => prop.glow_texture = source,
+                _ => {}
             }
             r.skip(4 + 4 + 4 + 2 + 2 + 2)?; // clamp + filter + uv set + ps2 l/k + unknown1
             // The bump-map slot (index 5) carries an extra scale/offset and 2x2 matrix.
@@ -624,7 +624,7 @@ fn texturing_property(r: &mut Reader) -> RResult<BlockRef> {
             }
         }
     }
-    Ok(base_texture)
+    Ok(prop)
 }
 
 /// `NiSourceTexture`: read the external filename (or walk past internal pixel data) plus the
@@ -680,5 +680,40 @@ mod tests {
         bytes.extend_from_slice(name);
         let err = Nif::parse(&bytes).unwrap_err();
         assert!(format!("{err}").contains("NiUnheardOfBlockType"));
+    }
+
+    #[test]
+    fn texturing_property_captures_base_and_glow_slots_exactly() {
+        // A synthetic `NiTexturingProperty` body with the base (0), glow (4) and bump (5)
+        // slots present. Pins both which refs are kept and — via the full-consumption
+        // check — the exact byte walk, including the bump slot's extra scale/matrix data.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // name (empty)
+        bytes.extend_from_slice(&(-1i32).to_le_bytes()); // extra data ref
+        bytes.extend_from_slice(&(-1i32).to_le_bytes()); // controller ref
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // flags
+        bytes.extend_from_slice(&2u32.to_le_bytes()); // apply mode
+        bytes.extend_from_slice(&7u32.to_le_bytes()); // texture count
+        fn tex_desc(bytes: &mut Vec<u8>, source: i32, bump: bool) {
+            bytes.extend_from_slice(&1u32.to_le_bytes()); // has texture
+            bytes.extend_from_slice(&source.to_le_bytes());
+            bytes.extend_from_slice(&[0u8; 18]); // clamp + filter + uv set + ps2 l/k + unknown1
+            if bump {
+                bytes.extend_from_slice(&[0u8; 24]); // luma scale/offset + 2x2 matrix
+            }
+        }
+        tex_desc(&mut bytes, 3, false); // slot 0: base
+        for _ in 1..4 {
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // slots 1-3 absent
+        }
+        tex_desc(&mut bytes, 5, false); // slot 4: glow
+        tex_desc(&mut bytes, 6, true); // slot 5: bump (walked past)
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // slot 6 absent
+
+        let mut r = Reader::new(&bytes);
+        let prop = texturing_property(&mut r).unwrap();
+        assert_eq!(prop.base_texture, BlockRef(3));
+        assert_eq!(prop.glow_texture, BlockRef(5));
+        assert_eq!(r.remaining(), 0, "body must be consumed exactly");
     }
 }

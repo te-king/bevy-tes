@@ -126,6 +126,60 @@ fn foliage_gets_alpha_masked_materials() {
 }
 
 #[test]
+fn glow_maps_become_emissive_textures() {
+    // Bloodmoon's ice troll carries a glow map (slot 4, tx_ice_troll03.dds) over its
+    // body. It must come through as the material's emissive texture with a white
+    // emissive factor (Bevy multiplies the two; the map alone drives the glow), and the
+    // texture itself must resolve through the VFS and load.
+    if tes_testdata::fixture("Bloodmoon.bsa").is_none() {
+        return;
+    }
+
+    let mut app = app_with_assets();
+    let handle: Handle<NifAsset> = app
+        .world()
+        .resource::<AssetServer>()
+        .load("tes://meshes/r/ice troll.nif");
+
+    let state = pump_until_loaded(&mut app, &handle);
+    assert!(
+        matches!(state, LoadState::Loaded),
+        "unexpected load state: {state:?}"
+    );
+
+    let material_handles = {
+        let assets = app.world().resource::<Assets<NifAsset>>();
+        assets
+            .get(&handle)
+            .expect("asset present once loaded")
+            .materials
+            .clone()
+    };
+    let glow_texture = {
+        let materials = app.world().resource::<Assets<StandardMaterial>>();
+        let glowing: Vec<_> = material_handles
+            .iter()
+            .filter_map(|m| materials.get(m))
+            .filter(|m| m.emissive_texture.is_some())
+            .collect();
+        assert!(!glowing.is_empty(), "the troll has a glow-mapped material");
+        for material in &glowing {
+            assert_eq!(
+                material.emissive,
+                bevy::color::LinearRgba::WHITE,
+                "a glow map needs a white emissive factor to show"
+            );
+        }
+        glowing[0].emissive_texture.clone().unwrap()
+    };
+    let state = pump_until_loaded(&mut app, &glow_texture);
+    assert!(
+        matches!(state, LoadState::Loaded),
+        "glow texture load state: {state:?}"
+    );
+}
+
+#[test]
 fn scene_labels_are_addressable_directly() {
     if tes_testdata::fixture("meshes/i/In_De_Shack_01.nif").is_none() {
         return;

@@ -176,11 +176,14 @@ pub struct TriShape {
     pub hidden: bool,
 }
 
-/// `NiTexturingProperty`: retains the reference of the base (first-slot) texture, i.e. the
-/// [`SourceTexture`] providing the diffuse map. [`BlockRef::NONE`] when that slot is unused.
+/// `NiTexturingProperty`: retains the references of the texture slots this crate renders —
+/// each a [`SourceTexture`] reference, [`BlockRef::NONE`] when the slot is unused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TexturingProperty {
+    /// Slot 0: the base (diffuse) colour map.
     pub base_texture: BlockRef,
+    /// Slot 4: the glow map, self-illumination added on top of the lit base colour.
+    pub glow_texture: BlockRef,
 }
 
 /// `NiSourceTexture`: an external texture reference, keeping the filename it names

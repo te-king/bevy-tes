@@ -10,9 +10,11 @@
 //! By default this renders one frame off a fixed three-quarter view, saves it to a PNG,
 //! and exits — printing the screenshot's absolute path so the image can be inspected.
 //! Pass `-o out.png` to choose where the screenshot lands, `--data <dir>` for a
-//! non-default data directory, or `--interactive` to instead open a live window with a
-//! fly camera: hold the right mouse button to look, WASD to fly, Space/Q for up/down,
-//! Shift to go faster, scroll to rescale the base speed.
+//! non-default data directory, `--dark` to stage a night scene (self-illumination such
+//! as glow maps stands out against moonlight-level lighting), or `--interactive` to
+//! instead open a live window with a fly camera: hold the right mouse button to look,
+//! WASD to fly, Space/Q for up/down, Shift to go faster, scroll to rescale the base
+//! speed.
 //!
 //! All the loading heavy lifting — scene-graph traversal, texture resolution through
 //! loose files and archives, material construction — happens inside `bevy_beth`'s NIF
@@ -52,6 +54,11 @@ struct Args {
     /// Open a live window with a fly camera instead of capturing a single screenshot.
     #[arg(long)]
     interactive: bool,
+
+    /// Stage a night scene (moonlight-level key and ambient light) instead of full
+    /// daylight — how the game shows glow maps and other self-illumination.
+    #[arg(long)]
+    dark: bool,
 }
 
 /// Handles to the loading model: the spawnable scene and the primary NIF asset (used to
@@ -66,6 +73,10 @@ struct ModelScene {
 /// Set once `frame_scene` has staged the camera/lights/ground around the spawned model.
 #[derive(Resource, Default)]
 struct Framed(bool);
+
+/// `--dark`: stage the set at night-time light levels.
+#[derive(Resource, Default)]
+struct DarkScene(bool);
 
 /// Screenshot destination; absent in `--interactive` mode.
 #[derive(Resource)]
@@ -136,7 +147,8 @@ fn main() -> ExitCode {
     }
 
     let model_path = args.path.clone();
-    app.init_resource::<Framed>()
+    app.insert_resource(DarkScene(args.dark))
+        .init_resource::<Framed>()
         .add_systems(
             Startup,
             move |mut commands: Commands, asset_server: Res<AssetServer>| {
@@ -199,6 +211,7 @@ fn frame_scene(
     mut holder: Query<&mut Transform, (With<Holder>, Without<Pivot>)>,
     mut pivot: Query<&mut Transform, With<Pivot>>,
     capture: Option<Res<Capture>>,
+    dark: Res<DarkScene>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if framed.0 {
@@ -295,14 +308,21 @@ fn frame_scene(
     ));
 
     // Frame the model: pull the camera back proportionally to its size, with ambient fill
-    // so faces away from the key light aren't pure black.
+    // so faces away from the key light aren't pure black. `--dark` drops both lights to
+    // moonlight levels, leaving self-illumination (glow maps, emissive materials) as the
+    // dominant source.
+    let (ambient, illuminance) = if dark.0 {
+        (12.0, 100.0)
+    } else {
+        (200.0, 6_000.0)
+    };
     let camera_transform = Transform::from_translation(Vec3::new(0.0, r * 0.6, r * 2.5))
         .looking_at(Vec3::ZERO, Vec3::Y);
     let mut camera = commands.spawn((
         Camera3d::default(),
         camera_transform,
         AmbientLight {
-            brightness: 200.0,
+            brightness: ambient,
             ..default()
         },
     ));
@@ -324,7 +344,7 @@ fn frame_scene(
     // enough resolution regardless of model scale.
     commands.spawn((
         DirectionalLight {
-            illuminance: 6_000.0,
+            illuminance,
             shadow_maps_enabled: true,
             ..default()
         },
