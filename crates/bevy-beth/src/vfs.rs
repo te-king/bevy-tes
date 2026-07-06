@@ -135,6 +135,19 @@ impl TesVfs {
             .find(|c| self.contains(c))
             .map(|c| normalize(&c).replace('\\', "/"))
     }
+
+    /// Resolve an ESM model reference to the VFS path (forward-slash form) that actually
+    /// exists, or `None`.
+    ///
+    /// `MODL` subrecord values are relative to `meshes\` without the prefix
+    /// (`f\act_bm_firelake00.nif`) — the engine prepends it. The verbatim path is also
+    /// tried as cheap robustness for mods that embed the prefix.
+    pub fn resolve_model(&self, name: &str) -> Option<String> {
+        [format!("meshes\\{name}"), name.to_string()]
+            .into_iter()
+            .find(|c| self.contains(c))
+            .map(|c| normalize(&c).replace('\\', "/"))
+    }
 }
 
 /// Walk `root` recursively, mapping each file's normalized relative path to its on-disk

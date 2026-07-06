@@ -24,16 +24,19 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
-use bevy::window::{CursorGrabMode, CursorOptions, ExitCondition, PrimaryWindow, WindowResolution};
+use bevy::window::{ExitCondition, WindowResolution};
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use clap::Parser;
 
 use bevy_beth::{BethPlugin, NifAsset};
+
+#[path = "helpers/fly_cam.rs"]
+mod fly_cam;
+use fly_cam::{FreeCam, free_cam};
 
 /// Render a TES3 `.nif` model with Bevy.
 #[derive(Parser, Debug)]
@@ -96,15 +99,6 @@ struct Pivot;
 /// sits on the pivot (and thus on the world origin the camera is staged around).
 #[derive(Component)]
 struct Holder;
-
-/// Fly camera (interactive mode): yaw/pitch track the mouse-look orientation, `speed` is
-/// the base fly speed in world units per second, scaled to the model at framing time.
-#[derive(Component)]
-struct FreeCam {
-    yaw: f32,
-    pitch: f32,
-    speed: f32,
-}
 
 fn main() -> ExitCode {
     let args = Args::parse();
@@ -358,78 +352,6 @@ fn frame_scene(
 
     println!("Framed tes://{} — r={r:.1} about {center:?}", model.path);
     framed.0 = true;
-}
-
-/// Fly-camera controller (interactive mode). Mouse-look engages only while the right
-/// button is held — the cursor locks for clean relative deltas and releases with the
-/// button, so the window stays usable. Movement is camera-relative except for the
-/// vertical axis, which is world-up (the usual editor-freecam convention).
-fn free_cam(
-    time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    motion: Res<AccumulatedMouseMotion>,
-    scroll: Res<AccumulatedMouseScroll>,
-    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
-    mut cam: Query<(&mut Transform, &mut FreeCam)>,
-) {
-    let Ok((mut transform, mut cam)) = cam.single_mut() else {
-        return;
-    };
-
-    let looking = buttons.pressed(MouseButton::Right);
-    if let Ok(mut options) = cursor.single_mut() {
-        let want = if looking {
-            CursorGrabMode::Locked
-        } else {
-            CursorGrabMode::None
-        };
-        if options.grab_mode != want {
-            options.grab_mode = want;
-            options.visible = !looking;
-        }
-    }
-    if looking && motion.delta != Vec2::ZERO {
-        cam.yaw -= motion.delta.x * 0.003;
-        // Stop just short of straight up/down so yaw stays well-defined.
-        cam.pitch = (cam.pitch - motion.delta.y * 0.003).clamp(-1.54, 1.54);
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, cam.yaw, cam.pitch, 0.0);
-    }
-
-    // Scroll rescales the base speed multiplicatively, so a few notches cover the range
-    // from lockpick-sized to building-sized models. Clamped per frame because trackpads
-    // report pixel deltas that would otherwise explode the exponent.
-    if scroll.delta.y != 0.0 {
-        cam.speed *= 1.15_f32.powf(scroll.delta.y.clamp(-4.0, 4.0));
-    }
-
-    let mut wish = Vec3::ZERO;
-    if keys.pressed(KeyCode::KeyW) {
-        wish += *transform.forward();
-    }
-    if keys.pressed(KeyCode::KeyS) {
-        wish -= *transform.forward();
-    }
-    if keys.pressed(KeyCode::KeyA) {
-        wish -= *transform.right();
-    }
-    if keys.pressed(KeyCode::KeyD) {
-        wish += *transform.right();
-    }
-    if keys.pressed(KeyCode::Space) || keys.pressed(KeyCode::KeyE) {
-        wish += Vec3::Y;
-    }
-    if keys.pressed(KeyCode::KeyQ) || keys.pressed(KeyCode::ControlLeft) {
-        wish -= Vec3::Y;
-    }
-    if wish != Vec3::ZERO {
-        let boost = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-            4.0
-        } else {
-            1.0
-        };
-        transform.translation += wish.normalize() * cam.speed * boost * time.delta_secs();
-    }
 }
 
 /// Screenshot-mode driver: once the scene is framed, let a few frames render so texture
