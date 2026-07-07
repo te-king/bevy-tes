@@ -7,8 +7,8 @@
 
 use crate::common::{
     Color, Subrecord, color, finish, flags, l1, le_f32, le_i32, le_u32, parse_or_default,
-    parse_struct,
 };
+use crate::macros::parse_struct;
 use crate::shared::{AmbientLight, TravelDestination, ambient_light, travel_destination};
 use nom::IResult;
 use tes_core::L1String;

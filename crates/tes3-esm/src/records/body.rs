@@ -1,8 +1,7 @@
 //! `BODY` — a body part.
 
-use crate::common::{
-    Subrecord, enum_field, enumeration, flags, l1, le_u8, parse_or_default, parse_struct,
-};
+use crate::common::{Subrecord, enumeration, flags, l1, le_u8, parse_or_default};
+use crate::macros::{enum_field, parse_struct};
 use tes_core::L1String;
 
 bitflags::bitflags! {

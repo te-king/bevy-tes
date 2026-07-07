@@ -1,6 +1,7 @@
 //! `GLOB` — a global variable.
 
-use crate::common::{Subrecord, enum_field, finish, l1, le_f32};
+use crate::common::{Subrecord, finish, l1, le_f32};
+use crate::macros::enum_field;
 use tes_core::L1String;
 
 enum_field! {

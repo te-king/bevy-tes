@@ -1,6 +1,7 @@
 //! `SOUN` — a sound effect.
 
-use crate::common::{Subrecord, l1, le_u8, parse_or_default, parse_struct};
+use crate::common::{Subrecord, l1, le_u8, parse_or_default};
+use crate::macros::parse_struct;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

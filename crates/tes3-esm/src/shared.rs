@@ -5,7 +5,8 @@
 //! String-bearing types own their text as [`L1String`](crate::L1String) (decoded on
 //! demand); purely numeric types ([`Effect`], [`AiData`], [`AmbientLight`]) are `Copy`.
 
-use super::common::{Color, color, enum_field, enumeration, fixed_l1str, flags, parse_struct};
+use super::common::{Color, color, enumeration, fixed_l1str, flags};
+use crate::macros::{enum_field, parse_struct};
 use nom::IResult;
 use nom::number::complete::{le_f32, le_i8, le_i32, le_u8, le_u16, le_u32};
 use tes_core::L1String;

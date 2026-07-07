@@ -1,6 +1,7 @@
 //! `SCPT` — a script.
 
-use crate::common::{Subrecord, fixed_l1str, l1, le_u32, parse_or_default, parse_struct};
+use crate::common::{Subrecord, fixed_l1str, l1, le_u32, parse_or_default};
+use crate::macros::parse_struct;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, PartialEq, Default)]
