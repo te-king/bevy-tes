@@ -11,7 +11,7 @@ tes-core = { workspace = true }
 thiserror = { workspace = true }
 nom = { workspace = true }
 memmap2 = "0.9"
-self_cell = "1"
+self_cell = { workspace = true }
 
 [dev-dependencies]
 tes-testdata = { workspace = true }

@@ -19,6 +19,7 @@ tes-testdata = { path = "crates/tes-testdata" }
 # Third-party.
 bitflags = "2"
 nom = "8"
+self_cell = "1"
 thiserror = "2"
 bevy = { version = "0.19", default-features = false, features = ["bevy_asset"] }
 clap = { version = "4", features = ["derive"] }

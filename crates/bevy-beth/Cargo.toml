@@ -12,6 +12,7 @@ tes3-esm = { workspace = true }
 tes3-bsa = { workspace = true }
 tes-nif = { workspace = true }
 bevy = { workspace = true }
+self_cell = { workspace = true }
 
 [features]
 default = ["scene", "render"]
