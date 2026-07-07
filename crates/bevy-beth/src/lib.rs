@@ -84,7 +84,9 @@ pub mod convert;
 mod scene;
 
 #[cfg(feature = "scene")]
-pub use cell::{CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellWater};
+pub use cell::{
+    CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
+};
 pub use index::{CellId, EsmIndex, ObjectInfo, ObjectKind};
 pub use vfs::{TesVfs, TesVfsReader};
 

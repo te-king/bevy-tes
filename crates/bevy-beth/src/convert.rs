@@ -1,11 +1,12 @@
-//! Pure conversions from parsed NIF data into Bevy engine types.
+//! Pure conversions from parsed NIF and ESM data into Bevy engine types.
 //!
-//! These are the stateless building blocks the scene builder (`scene` module) assembles:
-//! geometry, transforms and surface parameters, each mapped 1:1 from the parser types.
-//! The parser crates know nothing of Bevy; only this crate bridges the two.
+//! These are the stateless building blocks the scene builder (`scene` module) and cell
+//! spawner (`cell` module) assemble: geometry, transforms and surface parameters, each
+//! mapped 1:1 from the parser types. The parser crates know nothing of Bevy; only this
+//! crate bridges the two.
 
 use bevy::asset::{Handle, RenderAssetUsages};
-use bevy::color::{Color, LinearRgba};
+use bevy::color::{Color, ColorToComponents, LinearRgba};
 use bevy::image::Image;
 use bevy::material::AlphaMode;
 use bevy::math::{Mat3, Quat, Vec3};
@@ -14,6 +15,7 @@ use bevy::pbr::StandardMaterial;
 use bevy::transform::components::Transform;
 use tes_nif::{NifTransform, TriMesh};
 use tes3_esm::records::cell::ReferenceTransform;
+use tes3_esm::records::land::{CELL_SIZE, LAND_GRID, Land};
 
 /// Convert a `NiTriShapeData` triangle mesh into a Bevy [`Mesh`], in the shape's **local
 /// space** (the scene builder puts the transform on the entity instead).
@@ -80,6 +82,86 @@ pub fn cell_reference_transform(t: &ReferenceTransform, scale: f32) -> Transform
         rotation: c * q_game * c.inverse(),
         scale: Vec3::splat(scale.clamp(0.5, 2.0)),
     }
+}
+
+/// The Y-up world transform of a cell's terrain mesh: the cell's **south-west corner**
+/// mapped through the game→Bevy axis conversion `(x, y, z) → (x, z, -y)`. Pair with
+/// [`land_mesh`], which builds vertices relative to that corner.
+pub fn land_transform(grid_x: i32, grid_y: i32) -> Transform {
+    Transform::from_xyz(grid_x as f32 * CELL_SIZE, 0.0, -(grid_y as f32) * CELL_SIZE)
+}
+
+/// Build a Bevy [`Mesh`] from a `LAND` record's vertex grids, in **cell-local Y-up**
+/// coordinates with the origin at the cell's south-west corner (pair with
+/// [`land_transform`]). `None` when the record has no decodable heights.
+///
+/// Grid vertex `(x, y)` sits at game-frame offset `(x·128, y·128, height)` from the
+/// corner; through the axis map that is `[x·128, height, -y·128]`. Because the map is a
+/// proper rotation (determinant +1) baked entirely into the positions — including the
+/// negated z — game-frame counter-clockwise-up triangle winding carries over unchanged,
+/// so front faces point +Y and default backface culling shows the terrain from above.
+/// Each quad uses a fixed diagonal (vanilla alternates them checkerboard-style; the
+/// visual difference is negligible at terrain scale).
+///
+/// `VNML` normals map through the same axis conversion; when absent the mesh computes
+/// smooth normals from the geometry instead. `VCLR` vertex colors are gamma-space bytes
+/// and are converted sRGB→linear for Bevy's pipeline ([`StandardMaterial`] modulates by
+/// vertex color automatically); the attribute is omitted when `VCLR` is absent.
+pub fn land_mesh(land: &Land) -> Option<Mesh> {
+    const N: usize = LAND_GRID;
+    let heights = land.decode_heights()?;
+    let spacing = CELL_SIZE / (N - 1) as f32;
+
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(N * N);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(N * N);
+    for y in 0..N {
+        for x in 0..N {
+            positions.push([
+                x as f32 * spacing,
+                heights[y * N + x],
+                -(y as f32) * spacing,
+            ]);
+            uvs.push([x as f32 / (N - 1) as f32, 1.0 - y as f32 / (N - 1) as f32]);
+        }
+    }
+
+    let mut indices: Vec<u32> = Vec::with_capacity((N - 1) * (N - 1) * 6);
+    for y in 0..N - 1 {
+        for x in 0..N - 1 {
+            let (a, b, c, d) = (
+                (y * N + x) as u32,
+                (y * N + x + 1) as u32,
+                ((y + 1) * N + x) as u32,
+                ((y + 1) * N + x + 1) as u32,
+            );
+            indices.extend([a, b, c, b, d, c]);
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+
+    if let Some(normals) = land.decode_normals() {
+        let normals: Vec<[f32; 3]> = normals.iter().map(|[x, y, z]| [*x, *z, -*y]).collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    } else {
+        mesh.compute_smooth_normals();
+    }
+
+    if let Some(colors) = land.decode_colors() {
+        let colors: Vec<[f32; 4]> = colors
+            .iter()
+            .map(|&[r, g, b]| Color::srgb_u8(r, g, b).to_linear().to_f32_array())
+            .collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    }
+
+    Some(mesh)
 }
 
 /// Build the [`StandardMaterial`] for a shape from its resolved base-colour and glow-map
@@ -248,6 +330,120 @@ mod tests {
             let expected = c * (q_game * (2.0 * p) + Vec3::from(t.position));
             assert!((got - expected).length() < 1e-4, "{p}: {got} vs {expected}");
         }
+    }
+
+    /// A synthetic LAND: flat `base` height except vertex (1, 2) raised by `bump` VHGT
+    /// units, with optional uniform normals/colors.
+    fn synthetic_land(base: f32, bump: i8, normals: Option<[u8; 3]>, colors: bool) -> Land {
+        let mut deltas = vec![0u8; LAND_GRID * LAND_GRID];
+        // Raise (1, 2) then restore the running sum at (2, 2) so the rest stays flat.
+        deltas[2 * LAND_GRID + 1] = bump as u8;
+        deltas[2 * LAND_GRID + 2] = (-bump) as u8;
+        Land {
+            height_offset: Some(base),
+            heights: Some(deltas),
+            normals: normals.map(|n| {
+                n.iter()
+                    .copied()
+                    .cycle()
+                    .take(LAND_GRID * LAND_GRID * 3)
+                    .collect()
+            }),
+            colors: colors.then(|| {
+                [255u8, 0, 128]
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(LAND_GRID * LAND_GRID * 3)
+                    .collect()
+            }),
+            ..Land::default()
+        }
+    }
+
+    fn positions(mesh: &Mesh) -> &[[f32; 3]] {
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            .unwrap()
+            .as_float3()
+            .unwrap()
+    }
+
+    #[test]
+    fn land_mesh_layout_and_positions() {
+        let mesh = land_mesh(&synthetic_land(0.0, 5, None, false)).unwrap();
+        let positions = positions(&mesh);
+        assert_eq!(positions.len(), 65 * 65);
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("expected U32 indices");
+        };
+        assert_eq!(indices.len(), 64 * 64 * 6);
+        // Vertex (1, 2): east 1 step, north 2 steps, bumped 5 VHGT units = 40 game units.
+        assert_eq!(positions[2 * 65 + 1], [128.0, 40.0, -256.0]);
+        // Its east neighbor is back at the base height.
+        assert_eq!(positions[2 * 65 + 2], [256.0, 0.0, -256.0]);
+        // UVs: (64, 0) is the south-east corner → image-space bottom-right.
+        let uvs = match mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap() {
+            bevy::mesh::VertexAttributeValues::Float32x2(v) => v,
+            other => panic!("unexpected UV format: {other:?}"),
+        };
+        assert_eq!(uvs[64], [1.0, 1.0]);
+        assert_eq!(uvs[64 * 65], [0.0, 0.0]);
+    }
+
+    #[test]
+    fn land_mesh_winding_faces_up() {
+        let mesh = land_mesh(&synthetic_land(0.0, 0, None, false)).unwrap();
+        let positions = positions(&mesh);
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("expected U32 indices");
+        };
+        // Counter-clockwise front faces must point +Y (up) so terrain survives default
+        // backface culling when viewed from above.
+        for tri in indices.chunks_exact(3).take(4) {
+            let [p0, p1, p2] = [
+                Vec3::from(positions[tri[0] as usize]),
+                Vec3::from(positions[tri[1] as usize]),
+                Vec3::from(positions[tri[2] as usize]),
+            ];
+            let normal = (p1 - p0).cross(p2 - p0);
+            assert!(normal.y > 0.0, "triangle {tri:?} faces {normal}");
+        }
+    }
+
+    #[test]
+    fn land_mesh_maps_normals_and_colors() {
+        // Game +Z normals become Bevy +Y.
+        let mesh = land_mesh(&synthetic_land(0.0, 0, Some([0, 0, 127]), true)).unwrap();
+        let normals = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap() {
+            bevy::mesh::VertexAttributeValues::Float32x3(v) => v,
+            other => panic!("unexpected normal format: {other:?}"),
+        };
+        assert_eq!(normals[0], [0.0, 1.0, 0.0]);
+
+        // VCLR bytes are gamma-space: (255, 0, 128) → linear (1.0, 0.0, ~0.2158).
+        let colors = match mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() {
+            bevy::mesh::VertexAttributeValues::Float32x4(v) => v,
+            other => panic!("unexpected color format: {other:?}"),
+        };
+        let expected = Color::srgb_u8(255, 0, 128).to_linear().to_f32_array();
+        assert_eq!(colors[0], expected);
+        assert!((colors[0][2] - 0.2158) < 1e-3);
+
+        // VNML absent → normals still present (computed); VCLR absent → no color attribute.
+        let bare = land_mesh(&synthetic_land(0.0, 0, None, false)).unwrap();
+        assert!(bare.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
+        assert!(bare.attribute(Mesh::ATTRIBUTE_COLOR).is_none());
+    }
+
+    #[test]
+    fn land_mesh_requires_heights() {
+        assert!(land_mesh(&Land::default()).is_none());
+    }
+
+    #[test]
+    fn land_transform_maps_grid_corner() {
+        let t = land_transform(-3, -2);
+        assert_eq!(t.translation, Vec3::new(-24576.0, 0.0, 16384.0));
     }
 
     #[test]

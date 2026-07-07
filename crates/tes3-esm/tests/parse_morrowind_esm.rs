@@ -141,6 +141,84 @@ fn strings_are_stored_undecoded_and_decode_lazily() {
     assert!(matches!(plugin.header.company.decode(), Cow::Borrowed(_)));
 }
 
+/// The VHGT decode is validated against the authored data itself: vanilla terrain is
+/// seamless, so adjacent cells' independently delta-encoded shared edges must decode to
+/// identical heights. This pins both the running-sum rules and the row/column
+/// orientation without relying on any external reference implementation.
+#[test]
+fn land_heights_decode_and_tile_seamlessly() {
+    use std::collections::HashMap;
+    use tes3_esm::records::land::{HEIGHT_SCALE, Land, LandFlags};
+
+    let Some(bytes) = load_bytes() else { return };
+    let plugin = Plugin::parse(&bytes).unwrap();
+
+    let lands: HashMap<(i32, i32), &Land> = plugin
+        .records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Land(l) if l.data_types.contains(LandFlags::HAS_HEIGHTS) => {
+                Some(((l.grid_x, l.grid_y), l))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(lands.len() > 1_000, "vanilla has ~1390 LAND records");
+
+    // Every heights-bearing LAND decodes fully, to sane values.
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    let mut decoded: HashMap<(i32, i32), Vec<f32>> = HashMap::new();
+    for (&grid, land) in &lands {
+        let heights = land.decode_heights().expect("HAS_HEIGHTS should decode");
+        assert_eq!(heights.len(), 65 * 65);
+        for &h in &heights {
+            assert!(h.is_finite() && h.abs() < 500_000.0, "wild height {h}");
+            min = min.min(h);
+            max = max.max(h);
+        }
+        decoded.insert(grid, heights);
+    }
+    assert!(min < 0.0, "there should be ocean floor below sea level");
+    assert!(max > 0.0, "there should be mountains above sea level");
+
+    // Independent cross-check of the first vertex against the raw fields.
+    let land = lands.values().next().unwrap();
+    let expected = (land.height_offset.unwrap() + (land.heights.as_ref().unwrap()[0] as i8) as f32)
+        * HEIGHT_SCALE;
+    assert_eq!(land.decode_heights().unwrap()[0], expected);
+
+    // Seam check: east edge of (x, y) == west edge of (x+1, y); north edge of (x, y)
+    // == south edge of (x, y+1).
+    let mut compared = 0u64;
+    let mut mismatched = 0u64;
+    for (&(x, y), heights) in &decoded {
+        if let Some(east) = decoded.get(&(x + 1, y)) {
+            for row in 0..65 {
+                compared += 1;
+                if heights[row * 65 + 64] != east[row * 65] {
+                    mismatched += 1;
+                }
+            }
+        }
+        if let Some(north) = decoded.get(&(x, y + 1)) {
+            for col in 0..65 {
+                compared += 1;
+                if heights[64 * 65 + col] != north[col] {
+                    mismatched += 1;
+                }
+            }
+        }
+    }
+    assert!(compared > 100_000, "expected many adjacent cell pairs");
+    // Vanilla terrain is authored seamless; allow a small tolerance for any authored
+    // oddities without letting a wrong decode (which mismatches nearly everywhere) pass.
+    assert!(
+        mismatched * 20 < compared,
+        "{mismatched}/{compared} seam vertices mismatch — decode rules are wrong"
+    );
+}
+
 /// Time how long it takes to parse the full file. Run with `--show-output` (or
 /// `--nocapture`) to see the measurements, e.g.:
 /// `cargo test -p beth-rs --release parse_timing -- --show-output`
