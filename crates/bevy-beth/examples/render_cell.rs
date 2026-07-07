@@ -14,8 +14,8 @@
 //!
 //! Cell resolution, reference placement, light spawning and NIF/texture loading all
 //! happen inside `bevy_beth`; this example stages a camera and lighting around the
-//! spawned entities. Exterior cells render as placed objects only — LAND terrain isn't
-//! generated yet, so they float above the void.
+//! spawned entities. Exterior cells include their LAND terrain (vertex-colored, not yet
+//! texture-splatted) and a sea-level water plane where the ground dips below zero.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

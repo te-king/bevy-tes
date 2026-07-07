@@ -11,16 +11,19 @@ use bevy::asset::{AssetServer, Assets, Handle, LoadState};
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::light::PointLight;
 use bevy::math::{Quat, Vec3};
+use bevy::mesh::{Mesh, Mesh3d};
 use bevy::transform::components::Transform;
 use bevy::world_serialization::WorldAssetRoot;
 use tes3_esm::records::cell::{Cell, CellData, CellFlags, Reference, ReferenceTransform};
 use tes3_esm::records::crea::Crea;
+use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags};
 use tes3_esm::records::ligh::{Ligh, LightData};
 use tes3_esm::records::stat::Stat;
 use tes3_esm::{L1String, Plugin, Record};
 
 use bevy_beth::{
-    CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellWater, EsmAsset, EsmIndex,
+    CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
+    EsmAsset, EsmIndex,
 };
 
 mod common;
@@ -174,6 +177,95 @@ fn synthetic_cell_spawns_and_skips() {
     assert_eq!(water_transform.translation.y, 50.0);
 }
 
+/// A plugin with one exterior cell at grid (1, 2): a placed static plus a LAND record
+/// whose terrain sits uniformly below sea level (offset −10 → all heights −80).
+fn synthetic_exterior_asset() -> EsmAsset {
+    let plugin = Plugin {
+        header: Default::default(),
+        records: vec![
+            Record::Stat(Stat {
+                id: l1("test_stat"),
+                model: l1(r"x\nowhere.nif"),
+            }),
+            Record::Cell(Cell {
+                data: CellData {
+                    flags: CellFlags::empty(),
+                    grid_x: 1,
+                    grid_y: 2,
+                },
+                references: vec![reference(1, "test_stat", None)],
+                ..Default::default()
+            }),
+            Record::Land(Land {
+                grid_x: 1,
+                grid_y: 2,
+                data_types: LandFlags::HAS_HEIGHTS,
+                height_offset: Some(-10.0),
+                heights: Some(vec![0; LAND_GRID * LAND_GRID]),
+                ..Default::default()
+            }),
+        ],
+    };
+    let index = EsmIndex::build(&plugin);
+    EsmAsset { plugin, index }
+}
+
+#[test]
+fn synthetic_exterior_spawns_terrain_and_sea() {
+    let mut app = app_with_assets();
+    let handle = app
+        .world_mut()
+        .resource_mut::<Assets<EsmAsset>>()
+        .add(synthetic_exterior_asset());
+
+    let seed = app
+        .world_mut()
+        .spawn(CellSeed {
+            esm: handle,
+            cell: CellId::exterior(1, 2),
+        })
+        .id();
+    pump_until_settled(&mut app, seed);
+
+    // Terrain and water are extras, not references: only the stat is counted.
+    let spawned = app
+        .world()
+        .entity(seed)
+        .get::<CellSpawned>()
+        .expect("seed resolved");
+    assert_eq!((spawned.spawned, spawned.skipped), (1, 0));
+
+    // The terrain child sits at the cell's south-west corner with the full vertex grid.
+    let mut terrain = app
+        .world_mut()
+        .query::<(&CellTerrain, &Transform, &Mesh3d, &ChildOf)>();
+    let (_, transform, mesh, parent) = terrain.iter(app.world()).next().expect("terrain child");
+    assert_eq!(parent.parent(), seed);
+    assert_eq!(transform.translation, Vec3::new(8192.0, 0.0, -16384.0));
+    let mesh = mesh.0.clone();
+    let meshes = app.world().resource::<Assets<Mesh>>();
+    let positions = meshes
+        .get(&mesh)
+        .expect("terrain mesh stored")
+        .attribute(Mesh::ATTRIBUTE_POSITION)
+        .unwrap()
+        .as_float3()
+        .unwrap();
+    assert_eq!(positions.len(), LAND_GRID * LAND_GRID);
+    assert_eq!(positions[0][1], -10.0 * HEIGHT_SCALE);
+
+    // Sunken terrain gets a sea-level plane at the cell's centre.
+    let mut water = app
+        .world_mut()
+        .query::<(&CellWater, &Transform, &ChildOf)>();
+    let (_, water_transform, parent) = water.iter(app.world()).next().expect("sea-level water");
+    assert_eq!(parent.parent(), seed);
+    assert_eq!(
+        water_transform.translation,
+        Vec3::new(8192.0 + 4096.0, 0.0, -(16384.0 + 4096.0))
+    );
+}
+
 #[test]
 fn unknown_cell_marks_failure() {
     let mut app = app_with_assets();
@@ -301,8 +393,9 @@ fn exterior_cell_spawns_references() {
     let state = pump_until_loaded(&mut app, &esm);
     assert!(matches!(state, LoadState::Loaded), "{state:?}");
 
-    // Any well-populated exterior square will do; find one instead of pinning a grid.
-    let grid = {
+    // Any well-populated exterior square with terrain will do; find one instead of
+    // pinning a grid. Capture the raw VHGT fields for the independent cross-checks.
+    let (grid, expected_first_height, min_height) = {
         let esms = app.world().resource::<Assets<EsmAsset>>();
         let asset = esms.get(&esm).expect("ESM loaded");
         asset
@@ -313,11 +406,20 @@ fn exterior_cell_spawns_references() {
                 Record::Cell(c)
                     if !c.data.flags.contains(CellFlags::INTERIOR) && c.references.len() > 20 =>
                 {
-                    Some((c.data.grid_x, c.data.grid_y))
+                    let land = asset
+                        .index
+                        .land(&asset.plugin, c.data.grid_x, c.data.grid_y)?;
+                    let heights = land.decode_heights()?;
+                    // Recomputed from the raw fields, independently of decode_heights.
+                    let first = (land.height_offset.unwrap()
+                        + (land.heights.as_ref().unwrap()[0] as i8) as f32)
+                        * HEIGHT_SCALE;
+                    let min = heights.into_iter().fold(f32::INFINITY, f32::min);
+                    Some(((c.data.grid_x, c.data.grid_y), first, min))
                 }
                 _ => None,
             })
-            .expect("a populated exterior cell")
+            .expect("a populated exterior cell with terrain")
     };
 
     let seed = app
@@ -335,10 +437,33 @@ fn exterior_cell_spawns_references() {
         .get::<CellSpawned>()
         .expect("exterior seed resolved");
     assert!(spawned.spawned > 0, "{spawned:?}");
-    let mut water = app.world_mut().query::<&CellWater>();
-    assert_eq!(
-        water.iter(app.world()).count(),
-        0,
-        "exterior water is deferred until terrain exists"
-    );
+
+    // Exactly one terrain child, whose first vertex height matches the raw VHGT fields.
+    let mut terrain = app.world_mut().query::<(&CellTerrain, &Mesh3d, &ChildOf)>();
+    let handles: Vec<_> = terrain
+        .iter(app.world())
+        .filter(|(_, _, p)| p.parent() == seed)
+        .map(|(_, mesh, _)| mesh.0.clone())
+        .collect();
+    assert_eq!(handles.len(), 1, "one terrain child per exterior cell");
+    let meshes = app.world().resource::<Assets<Mesh>>();
+    let positions = meshes
+        .get(&handles[0])
+        .expect("terrain mesh stored")
+        .attribute(Mesh::ATTRIBUTE_POSITION)
+        .unwrap()
+        .as_float3()
+        .unwrap();
+    assert_eq!(positions.len(), LAND_GRID * LAND_GRID);
+    assert_eq!(positions[0][1], expected_first_height);
+
+    // Sea-level water appears exactly when the terrain dips below height 0.
+    let mut water = app.world_mut().query::<(&CellWater, &Transform)>();
+    let planes: Vec<_> = water.iter(app.world()).collect();
+    if min_height < 0.0 {
+        assert_eq!(planes.len(), 1, "coastal terrain gets a sea plane");
+        assert_eq!(planes[0].1.translation.y, 0.0);
+    } else {
+        assert!(planes.is_empty(), "inland terrain spawns no water");
+    }
 }

@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 use tes3_esm::records::cell::Cell;
 use tes3_esm::records::cell::CellFlags;
+use tes3_esm::records::land::Land;
 use tes3_esm::records::ligh::LightData;
 use tes3_esm::{L1Str, Plugin, Record};
 
@@ -86,6 +87,8 @@ pub struct EsmIndex {
     interiors: HashMap<String, usize>,
     /// Exterior grid → index into `plugin.records`.
     exteriors: HashMap<(i32, i32), usize>,
+    /// Exterior grid → index of the cell's `LAND` record.
+    lands: HashMap<(i32, i32), usize>,
 }
 
 impl EsmIndex {
@@ -142,6 +145,9 @@ impl EsmIndex {
                 // "leveled list" rather than "unknown id".
                 Record::Levi(r) => index.object_entry(&r.id, ObjectKind::LeveledItem, None),
                 Record::Levc(r) => index.object_entry(&r.id, ObjectKind::LeveledCreature, None),
+                Record::Land(land) => {
+                    index.lands.insert((land.grid_x, land.grid_y), i);
+                }
                 _ => {}
             }
         }
@@ -161,6 +167,14 @@ impl EsmIndex {
         };
         match plugin.records.get(i) {
             Some(Record::Cell(cell)) => Some(cell),
+            _ => None,
+        }
+    }
+
+    /// Look up an exterior cell's `LAND` record by grid coordinates.
+    pub fn land<'p>(&self, plugin: &'p Plugin, x: i32, y: i32) -> Option<&'p Land> {
+        match plugin.records.get(*self.lands.get(&(x, y))?) {
+            Some(Record::Land(land)) => Some(land),
             _ => None,
         }
     }
@@ -242,6 +256,11 @@ mod tests {
                     },
                     ..Default::default()
                 }),
+                Record::Land(Land {
+                    grid_x: -3,
+                    grid_y: 12,
+                    ..Default::default()
+                }),
             ],
         }
     }
@@ -282,5 +301,15 @@ mod tests {
 
         assert!(index.cell(&plugin, &CellId::interior("nowhere")).is_none());
         assert!(index.cell(&plugin, &CellId::exterior(99, 99)).is_none());
+    }
+
+    #[test]
+    fn lands_resolve_by_grid() {
+        let plugin = synthetic_plugin();
+        let index = EsmIndex::build(&plugin);
+
+        let land = index.land(&plugin, -3, 12).expect("land by grid");
+        assert_eq!((land.grid_x, land.grid_y), (-3, 12));
+        assert!(index.land(&plugin, 99, 99).is_none());
     }
 }

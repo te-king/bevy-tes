@@ -13,6 +13,10 @@
 //! });
 //! ```
 //!
+//! Exterior cells also grow a terrain child tagged [`CellTerrain`] — a mesh built from
+//! the cell's `LAND` record (65×65 vertex heights, normals and colors) — plus a sea-level
+//! water plane when the terrain dips below height 0.
+//!
 //! What is *not* spawned (counted in [`CellSpawned::skipped`], logged at debug level):
 //! NPCs and creatures (their NIFs are skinned, which the scene builder doesn't support
 //! yet), leveled-creature/item spawn points (they need runtime list resolution),
@@ -43,6 +47,7 @@ use bevy::pbr::{MeshMaterial3d, StandardMaterial};
 use bevy::transform::components::Transform;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use tes3_esm::records::cell::{Cell, CellFlags, Reference};
+use tes3_esm::records::land::CELL_SIZE;
 use tes3_esm::records::ligh::LightFlags;
 
 use crate::index::{CellId, ObjectKind};
@@ -89,10 +94,15 @@ pub struct CellReference {
     pub object: String,
 }
 
-/// Marker on the stand-in water plane spawned for interior cells with water; despawn or
-/// replace it for real water rendering.
+/// Marker on the stand-in water plane spawned for cells with water (interior water at
+/// its authored height, exterior sea level at 0); despawn or replace it for real water
+/// rendering.
 #[derive(Component, Debug)]
 pub struct CellWater;
+
+/// Marker on the terrain mesh child spawned for an exterior cell with `LAND` data.
+#[derive(Component, Debug)]
+pub struct CellTerrain;
 
 /// The cell's staging values, converted to Bevy colors and inserted on the seed entity.
 /// The library doesn't apply them — ambient light is per-camera in Bevy — so the app
@@ -128,6 +138,7 @@ pub fn spawn_cells(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut warned: Local<HashSet<String>>,
+    mut terrain_material: Local<Option<bevy::asset::Handle<StandardMaterial>>>,
 ) {
     for (seed_entity, seed) in &seeds {
         let Some(esm) = esms.get(&seed.esm) else {
@@ -173,6 +184,20 @@ pub fn spawn_cells(
         let (spawned, skipped) = (spawner.spawned, spawner.skipped);
         let center = spawner.position_sum / spawned.max(1) as f32;
 
+        let terrain_min_height = if cell.data.flags.contains(CellFlags::INTERIOR) {
+            None
+        } else {
+            spawn_terrain(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut terrain_material,
+                seed_entity,
+                esm,
+                cell.data.grid_x,
+                cell.data.grid_y,
+            )
+        };
         spawn_water(
             &mut commands,
             &mut meshes,
@@ -180,6 +205,7 @@ pub fn spawn_cells(
             seed_entity,
             cell,
             center,
+            terrain_min_height,
         );
         commands
             .entity(seed_entity)
@@ -292,9 +318,57 @@ fn environment(cell: &Cell) -> CellEnvironment {
     }
 }
 
-/// Spawn the stand-in water plane for an interior cell with water: a large translucent
-/// sheet at the water height, centred on the spawned references (interior coordinates
-/// aren't origin-centred). Exterior water is deferred until terrain exists.
+/// Spawn the terrain mesh child for an exterior cell, when its `LAND` record exists and
+/// has heights. Returns the minimum decoded terrain height in game units (it drives the
+/// sea-level water decision). Cells without `LAND` — map edges, sparse plugins — skip
+/// silently: that's authored absence, not an error, and (like water) terrain doesn't
+/// count toward the seed's reference tallies.
+#[allow(clippy::too_many_arguments)]
+fn spawn_terrain(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    terrain_material: &mut Option<bevy::asset::Handle<StandardMaterial>>,
+    seed_entity: Entity,
+    esm: &EsmAsset,
+    grid_x: i32,
+    grid_y: i32,
+) -> Option<f32> {
+    let land = esm.index.land(&esm.plugin, grid_x, grid_y)?;
+    let mesh = convert::land_mesh(land)?;
+    let min = land
+        .decode_heights()?
+        .into_iter()
+        .fold(f32::INFINITY, f32::min);
+    // All cells share one matte white material; the LAND vertex colors carry the tint.
+    let material = terrain_material
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 1.0,
+                ..Default::default()
+            })
+        })
+        .clone();
+    commands.spawn((
+        Mesh3d(meshes.add(mesh)),
+        MeshMaterial3d(material),
+        convert::land_transform(grid_x, grid_y),
+        Visibility::default(),
+        Name::new(format!("Terrain {grid_x},{grid_y}")),
+        CellTerrain,
+        ChildOf(seed_entity),
+    ));
+    Some(min)
+}
+
+/// Spawn the stand-in water plane for a cell:
+///
+/// - **Interior** with water: a large translucent sheet at the authored water height,
+///   centred on the spawned references (interior coordinates aren't origin-centred).
+/// - **Exterior**: sea level is the implicit global height 0 — one cell-sized plane,
+///   spawned only when the cell has terrain that dips below it (inland cells skip the
+///   hidden plane; neighbouring cells' planes tile seamlessly).
 fn spawn_water(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -302,15 +376,27 @@ fn spawn_water(
     seed_entity: Entity,
     cell: &Cell,
     center: Vec3,
+    terrain_min_height: Option<f32>,
 ) {
     let interior = cell.data.flags.contains(CellFlags::INTERIOR);
-    let has_water = cell.data.flags.contains(CellFlags::HAS_WATER) || cell.water_height.is_some();
-    if !interior || !has_water {
-        return;
-    }
-    let height = cell.water_height.unwrap_or(0.0);
+    let (center, half_size) = if interior {
+        let has_water =
+            cell.data.flags.contains(CellFlags::HAS_WATER) || cell.water_height.is_some();
+        if !has_water {
+            return;
+        }
+        let height = cell.water_height.unwrap_or(0.0);
+        (Vec3::new(center.x, height, center.z), 8192.0)
+    } else {
+        if !terrain_min_height.is_some_and(|min| min < 0.0) {
+            return;
+        }
+        let half = CELL_SIZE / 2.0;
+        let corner = convert::land_transform(cell.data.grid_x, cell.data.grid_y).translation;
+        (corner + Vec3::new(half, 0.0, -half), half)
+    };
     commands.spawn((
-        Mesh3d(meshes.add(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(8192.0))))),
+        Mesh3d(meshes.add(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(half_size))))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgba(0.1, 0.3, 0.5, 0.6),
             alpha_mode: AlphaMode::Blend,
@@ -318,7 +404,7 @@ fn spawn_water(
             cull_mode: None,
             ..Default::default()
         })),
-        Transform::from_translation(Vec3::new(center.x, height, center.z)),
+        Transform::from_translation(center),
         Visibility::default(),
         Name::new("Water"),
         CellWater,
