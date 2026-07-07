@@ -2,8 +2,10 @@
 //!
 //! A BSA is a flat archive: a small directory (file sizes, offsets, names and lookup
 //! hashes) followed by the concatenated file data. Opening an archive mmaps the file and
-//! builds an in-memory directory of [`FileRecord`]s; individual file bytes are served as
-//! zero-copy slices into the mapping:
+//! validates the directory once — nothing is copied or decoded up front. Directory
+//! entries are served as [`FileRecord`] views borrowing from the mapping, and lookups go
+//! through the archive's own sorted hash table (a [`name_hash`] computation plus a binary
+//! search — the same scheme the game engine uses):
 //!
 //! ```no_run
 //! let bsa = tes3_bsa::Bsa::open("data/Morrowind.bsa").unwrap();
@@ -12,16 +14,11 @@
 //! }
 //! ```
 
-use nom::IResult;
-use nom::bytes::complete::take;
-use nom::number::complete::le_u32;
-use std::collections::HashMap;
 use std::path::Path;
-use tes_core::L1String;
-use tes_core::paths::normalize;
 
-/// The only BSA layout version Morrowind/Tribunal/Bloodmoon use.
-pub const VERSION_TES3: u32 = 0x100;
+mod directory;
+
+pub use directory::{FileRecord, VERSION_TES3, name_hash};
 
 /// Error returned when reading or parsing a BSA archive.
 #[derive(Debug, thiserror::Error)]
@@ -34,143 +31,107 @@ pub enum BsaError {
     Parse(String),
 }
 
-/// Directory entry for a single archived file: its name, lookup hash, and location within
-/// the data section of the archive.
-#[derive(Debug, Clone, PartialEq)]
-pub struct FileRecord {
-    /// Path within the archive, e.g. `meshes\m\probe_journeyman_01.nif` (Windows-1252,
-    /// backslash-separated).
-    pub name: L1String,
-    /// The directory's precomputed lookup hash for `name`.
-    pub hash: u64,
-    /// Byte offset of this file's data within the archive's data section.
-    pub offset: u32,
-    /// Byte length of this file's data.
-    pub size: u32,
-}
-
-/// An open TES3 BSA archive. Holds an mmap of the archive file and an in-memory directory
-/// of [`FileRecord`]s; file bytes are served as zero-copy slices into the mapping.
+/// An open TES3 BSA archive: an mmap of the archive file plus its validated directory
+/// geometry. All accessors are zero-copy views into the mapping and, because
+/// [`open`](Self::open) validated the directory up front, panic-free.
 ///
 /// Dropping the `Bsa` releases the mmap (the OS unmaps the pages).
 #[derive(Debug)]
 pub struct Bsa {
-    pub version: u32,
-    pub files: Vec<FileRecord>,
     mmap: memmap2::Mmap,
-    /// Absolute byte offset within `mmap` at which the file data section begins.
-    data_start: usize,
-    /// Normalized name → index into `files`, so [`get`](Self::get) is a hash lookup.
-    index: HashMap<String, usize>,
-}
-
-/// Read a little-endian `u32` from a fixed position in an exact-length block.
-fn u32_at(block: &[u8], byte: usize) -> u32 {
-    u32::from_le_bytes(block[byte..byte + 4].try_into().expect("4 bytes"))
+    dir: directory::Directory,
 }
 
 impl Bsa {
-    /// Open a BSA archive at `path`, mapping it into memory and building the file directory.
-    /// File data is not copied; bytes are served on demand as zero-copy slices via
-    /// [`bytes`](Self::bytes) and [`get`](Self::get).
+    /// Open a BSA archive at `path`, mapping it into memory and validating the directory.
+    /// No file data or names are copied; everything is served on demand as zero-copy
+    /// views via [`files`](Self::files), [`bytes`](Self::bytes) and [`get`](Self::get).
     pub fn open(path: impl AsRef<Path>) -> Result<Bsa, BsaError> {
         let file = std::fs::File::open(path)?;
         // SAFETY: We open the file read-only and never write through the mapping.
         // Concurrent modification of game data files by another process is not expected.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        Self::parse_directory(mmap)
+        let dir = directory::parse(&mmap)?;
+        Ok(Bsa { mmap, dir })
     }
 
-    fn parse_directory(mmap: memmap2::Mmap) -> Result<Bsa, BsaError> {
-        let parse = |input| -> IResult<&[u8], (u32, usize, Vec<FileRecord>)> {
-            let (input, version) = le_u32(input)?;
-            let (input, hash_offset) = le_u32(input)?;
-            let (input, count) = le_u32(input)?;
-            let count = count as usize;
-            let hash_offset = hash_offset as usize;
-
-            // After the 12-byte header come three parallel tables, then a name blob,
-            // then the hash table; `hash_offset` spans everything between the header and
-            // the hash table.
-            let (input, size_offsets) = take(count * 8)(input)?; // (u32 size, u32 offset)
-            let (input, name_offsets) = take(count * 4)(input)?; // u32 into name blob
-            let names_len = hash_offset
-                .checked_sub(count * 12)
-                .ok_or_else(|| nom_fail(input))?;
-            let (input, names) = take(names_len)(input)?;
-            let (_, hashes) = take(count * 8)(input)?; // two u32 halves per file
-
-            // data_start = 12 (header) + hash_offset (dir tables) + count * 8 (hash table)
-            let data_start = 12 + hash_offset + count * 8;
-
-            let mut files = Vec::with_capacity(count);
-            for i in 0..count {
-                let size = u32_at(size_offsets, i * 8);
-                let offset = u32_at(size_offsets, i * 8 + 4);
-                let name_off = u32_at(name_offsets, i * 4) as usize;
-
-                let name_bytes = names.get(name_off..).ok_or_else(|| nom_fail(hashes))?;
-                let end = name_bytes
-                    .iter()
-                    .position(|&b| b == 0)
-                    .unwrap_or(name_bytes.len());
-                let name = L1String::from_bytes(name_bytes[..end].to_vec());
-
-                let hash = u64::from_le_bytes(hashes[i * 8..i * 8 + 8].try_into().unwrap());
-
-                files.push(FileRecord {
-                    name,
-                    hash,
-                    offset,
-                    size,
-                });
-            }
-
-            Ok((&[], (version, data_start, files)))
-        };
-
-        let input: &[u8] = &mmap;
-        let (_, (version, data_start, files)) =
-            parse(input).map_err(|e| BsaError::Parse(format!("{e:?}")))?;
-
-        if version != VERSION_TES3 {
-            return Err(BsaError::Parse(format!(
-                "unsupported BSA version {:#x} (expected {:#x})",
-                version, VERSION_TES3
-            )));
-        }
-
-        let index = files
-            .iter()
-            .enumerate()
-            .map(|(i, f)| (normalize(&f.name.decode()), i))
-            .collect();
-
-        Ok(Bsa {
-            version,
-            files,
-            mmap,
-            data_start,
-            index,
-        })
+    /// The archive's layout version — [`VERSION_TES3`] for anything that opens.
+    pub fn version(&self) -> u32 {
+        self.dir.version
     }
 
-    /// Return the raw bytes for `record` as a zero-copy slice into the archive mapping.
-    pub fn bytes(&self, record: &FileRecord) -> &[u8] {
-        let start = self.data_start + record.offset as usize;
+    /// Number of archived files.
+    pub fn len(&self) -> usize {
+        self.dir.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.dir.count == 0
+    }
+
+    /// Directory entry `i` (entries are ordered by [`name_hash`]). Panics if `i` is out
+    /// of range, like indexing.
+    pub fn file(&self, i: usize) -> FileRecord<'_> {
+        assert!(i < self.dir.count, "file index {i} out of range");
+        self.dir.record(&self.mmap, i)
+    }
+
+    /// Iterate over all directory entries.
+    pub fn files(&self) -> impl ExactSizeIterator<Item = FileRecord<'_>> {
+        (0..self.dir.count).map(|i| self.dir.record(&self.mmap, i))
+    }
+
+    /// The raw bytes for `record`, as a zero-copy slice into the archive mapping.
+    pub fn bytes(&self, record: FileRecord<'_>) -> &[u8] {
+        let start = self.dir.data_start + record.offset as usize;
         &self.mmap[start..start + record.size as usize]
     }
 
     /// Look up a file by path, case-insensitively and tolerant of `/` vs `\` separators.
-    /// Returns a zero-copy slice into the archive mapping on success. A hash lookup against
-    /// an index built at open time.
+    /// Returns a zero-copy slice into the archive mapping on success.
+    ///
+    /// This computes the path's [`name_hash`] and binary-searches the archive's hash
+    /// table — engine-identical semantics, including the (astronomically unlikely)
+    /// possibility of a 64-bit hash collision resolving a name the archive doesn't
+    /// contain.
     pub fn get(&self, name: &str) -> Option<&[u8]> {
-        let record = &self.files[*self.index.get(&normalize(name))?];
-        Some(self.bytes(record))
+        let i = self.dir.find(&self.mmap, name_hash(name))?;
+        Some(self.bytes(self.dir.record(&self.mmap, i)))
     }
 }
 
-/// Build a nom error anchored at `input` for use with the `?` operator.
-fn nom_fail(input: &[u8]) -> nom::Err<nom::error::Error<&[u8]>> {
-    nom::Err::Failure(nom::error::Error::new(input, nom::error::ErrorKind::Verify))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::directory::testutil::build_archive;
+
+    /// End-to-end over a real (temporary) file: the only test that needs `open`'s mmap
+    /// path; everything else is covered on byte slices in `directory::tests`.
+    #[test]
+    fn opens_and_serves_a_synthetic_archive() {
+        let archive = build_archive(&[
+            (r"Meshes\B\Thing.NIF", b"NIF-DATA"),
+            (r"textures\wood.dds", b"DDS"),
+        ]);
+        let path = std::env::temp_dir().join(format!("tes3-bsa-test-{}.bsa", std::process::id()));
+        std::fs::write(&path, &archive).expect("write temp archive");
+
+        let bsa = Bsa::open(&path).expect("open");
+        assert_eq!(bsa.version(), VERSION_TES3);
+        assert_eq!(bsa.len(), 2);
+        assert_eq!(bsa.files().len(), 2);
+
+        // Any case, either separator.
+        let nif = bsa.get("meshes/b/THING.nif").expect("hash lookup hit");
+        assert_eq!(nif, b"NIF-DATA");
+        assert_eq!(bsa.get("meshes/b/missing.nif"), None);
+
+        let record = bsa
+            .files()
+            .find(|f| f.name == r"textures\wood.dds")
+            .unwrap();
+        assert_eq!(bsa.bytes(record), b"DDS");
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

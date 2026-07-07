@@ -10,8 +10,8 @@ fn open_bsa() -> Option<Bsa> {
 #[test]
 fn parses_archive() {
     let Some(bsa) = open_bsa() else { return };
-    assert_eq!(bsa.version, 0x100);
-    assert_eq!(bsa.files.len(), 11_090);
+    assert_eq!(bsa.version(), 0x100);
+    assert_eq!(bsa.len(), 11_090);
 
     // Reference entry from an independent directory scan.
     let probe = bsa
@@ -26,11 +26,34 @@ fn parses_archive() {
 #[test]
 fn every_entry_has_a_name_and_data() {
     let Some(bsa) = open_bsa() else { return };
-    for f in &bsa.files {
+    for f in bsa.files() {
         assert!(!f.name.is_empty(), "every entry should have a name");
     }
-    let total: usize = bsa.files.iter().map(|f| bsa.bytes(f).len()).sum();
+    let total: usize = bsa.files().map(|f| bsa.bytes(f).len()).sum();
     assert!(total > 0, "archive should contain file data");
+}
+
+/// Recompute every entry's name hash and resolve every name through `get` — pins the
+/// hash algorithm (word placement, byte order, sort key) and the binary-search lookup
+/// against the full real directory.
+#[test]
+fn computed_hashes_match_and_every_name_resolves() {
+    let Some(bsa) = open_bsa() else { return };
+    for f in bsa.files() {
+        let name = f.name.decode();
+        assert_eq!(
+            tes3_bsa::name_hash(&name),
+            f.hash,
+            "computed hash should match the directory's for {name}"
+        );
+        let data = bsa
+            .get(&name)
+            .unwrap_or_else(|| panic!("{name} should resolve through the hash table"));
+        assert!(
+            std::ptr::eq(data, bsa.bytes(f)),
+            "{name} should resolve to its own data"
+        );
+    }
 }
 
 #[test]
@@ -39,8 +62,7 @@ fn dds_textures_have_the_dds_magic() {
     // Spot-check that a .dds entry's bytes really are a DDS file ("DDS " magic),
     // proving the size/offset resolution lands on the right data.
     let dds = bsa
-        .files
-        .iter()
+        .files()
         .find(|f| f.name.decode().to_ascii_lowercase().ends_with(".dds"))
         .expect("archive contains textures");
     assert_eq!(&bsa.bytes(dds)[..4], b"DDS ");
@@ -72,8 +94,7 @@ fn parse_timing() {
     };
     let total_data: usize = Bsa::open(&path)
         .expect("open bsa")
-        .files
-        .iter()
+        .files()
         .map(|f| f.size as usize)
         .sum();
     const ITERATIONS: u32 = 20;
@@ -86,12 +107,12 @@ fn parse_timing() {
         let start = Instant::now();
         let bsa = Bsa::open(&path).expect("open should succeed");
         let mut acc = 0u64;
-        for f in &bsa.files {
+        for f in bsa.files() {
             acc = fold(acc, bsa.bytes(f));
         }
         let elapsed = start.elapsed();
         checksum ^= acc;
-        file_count = bsa.files.len();
+        file_count = bsa.len();
         total += elapsed;
         best = best.min(elapsed);
     }

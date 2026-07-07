@@ -10,8 +10,8 @@ fn open_bsa() -> Option<Bsa> {
 #[test]
 fn parses_archive() {
     let Some(bsa) = open_bsa() else { return };
-    assert_eq!(bsa.version, 0x100);
-    assert_eq!(bsa.files.len(), 1_545);
+    assert_eq!(bsa.version(), 0x100);
+    assert_eq!(bsa.len(), 1_545);
 
     let tex = bsa
         .get(r"textures\c_nordic02_upperarm.dds")
@@ -23,11 +23,32 @@ fn parses_archive() {
 fn dds_textures_have_the_dds_magic() {
     let Some(bsa) = open_bsa() else { return };
     let dds = bsa
-        .files
-        .iter()
+        .files()
         .find(|f| f.name.decode().to_ascii_lowercase().ends_with(".dds"))
         .expect("archive contains textures");
     assert_eq!(&bsa.bytes(dds)[..4], b"DDS ");
+}
+
+/// Recompute every entry's name hash and resolve every name through `get` — same pin as
+/// the Morrowind.bsa test, against the expansion's directory.
+#[test]
+fn computed_hashes_match_and_every_name_resolves() {
+    let Some(bsa) = open_bsa() else { return };
+    for f in bsa.files() {
+        let name = f.name.decode();
+        assert_eq!(
+            tes3_bsa::name_hash(&name),
+            f.hash,
+            "computed hash should match the directory's for {name}"
+        );
+        let data = bsa
+            .get(&name)
+            .unwrap_or_else(|| panic!("{name} should resolve through the hash table"));
+        assert!(
+            std::ptr::eq(data, bsa.bytes(f)),
+            "{name} should resolve to its own data"
+        );
+    }
 }
 
 /// Fold bytes into a checksum fast enough to stay memory-bandwidth bound, so the read
@@ -55,8 +76,7 @@ fn parse_timing() {
     };
     let total_data: usize = Bsa::open(&path)
         .expect("open bsa")
-        .files
-        .iter()
+        .files()
         .map(|f| f.size as usize)
         .sum();
     const ITERATIONS: u32 = 20;
@@ -69,12 +89,12 @@ fn parse_timing() {
         let start = Instant::now();
         let bsa = Bsa::open(&path).expect("open should succeed");
         let mut acc = 0u64;
-        for f in &bsa.files {
+        for f in bsa.files() {
             acc = fold(acc, bsa.bytes(f));
         }
         let elapsed = start.elapsed();
         checksum ^= acc;
-        file_count = bsa.files.len();
+        file_count = bsa.len();
         total += elapsed;
         best = best.min(elapsed);
     }

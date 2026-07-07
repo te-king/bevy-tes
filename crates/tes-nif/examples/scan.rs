@@ -70,7 +70,7 @@ fn main() {
     for path in &archives {
         let bsa = Bsa::open(path).expect("open bsa");
         let archive = path.file_name().unwrap().to_string_lossy();
-        for f in &bsa.files {
+        for f in bsa.files() {
             let name = f.name.decode();
             if name.to_ascii_lowercase().ends_with(".nif") {
                 tally.record(&format!("{archive}:{name}"), bsa.bytes(f));

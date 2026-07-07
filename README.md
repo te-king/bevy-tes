@@ -58,7 +58,8 @@ cargo run -p bevy-beth --example render_nif --features render -- \
 cargo run -p bevy-beth --example load_esm -- data/Morrowind.esm
 
 # Poke at archives/plugins from the command line:
-cargo run -p tes3-bsa --example cli -- bsa list data/Morrowind.bsa --limit 20
+cargo run -p tes3-bsa --example cli -- list data/Morrowind.bsa --limit 20
+cargo run -p tes3-esm --example inspect -- data/Morrowind.esm
 ```
 
 ## Game data

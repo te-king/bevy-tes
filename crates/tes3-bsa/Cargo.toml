@@ -13,7 +13,5 @@ nom = { workspace = true }
 memmap2 = "0.9"
 
 [dev-dependencies]
-# The `cli` example also inspects plugins, so it needs the ESM parser.
-tes3-esm = { workspace = true }
 tes-testdata = { workspace = true }
 clap = { workspace = true }

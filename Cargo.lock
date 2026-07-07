@@ -4688,7 +4688,6 @@ dependencies = [
  "nom",
  "tes-core",
  "tes-testdata",
- "tes3-esm",
  "thiserror 2.0.18",
 ]
 
@@ -4697,6 +4696,7 @@ name = "tes3-esm"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.0",
+ "clap",
  "nom",
  "tes-core",
  "tes-testdata",
