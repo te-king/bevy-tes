@@ -14,10 +14,14 @@
 //! }
 //! ```
 
+use std::fmt;
 use std::path::Path;
+
+use memmap2::Mmap;
 
 mod directory;
 
+use directory::Directory;
 pub use directory::{FileRecord, VERSION_TES3, name_hash};
 
 /// Error returned when reading or parsing a BSA archive.
@@ -31,16 +35,22 @@ pub enum BsaError {
     Parse(String),
 }
 
-/// An open TES3 BSA archive: an mmap of the archive file plus its validated directory
-/// geometry. All accessors are zero-copy views into the mapping and, because
+self_cell::self_cell!(
+    struct BsaCell {
+        owner: Mmap,
+
+        #[covariant]
+        dependent: Directory,
+    }
+);
+
+/// An open TES3 BSA archive: an mmap of the archive file coupled to the [`Directory`]
+/// of slices borrowing from it (a `self_cell` pairing, so the mapping and its views move
+/// as one value). All accessors are zero-copy views into the mapping and, because
 /// [`open`](Self::open) validated the directory up front, panic-free.
 ///
 /// Dropping the `Bsa` releases the mmap (the OS unmaps the pages).
-#[derive(Debug)]
-pub struct Bsa {
-    mmap: memmap2::Mmap,
-    dir: directory::Directory,
-}
+pub struct Bsa(BsaCell);
 
 impl Bsa {
     /// Open a BSA archive at `path`, mapping it into memory and validating the directory.
@@ -50,41 +60,44 @@ impl Bsa {
         let file = std::fs::File::open(path)?;
         // SAFETY: We open the file read-only and never write through the mapping.
         // Concurrent modification of game data files by another process is not expected.
-        let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        let dir = directory::parse(&mmap)?;
-        Ok(Bsa { mmap, dir })
+        let mmap = unsafe { Mmap::map(&file)? };
+        Ok(Bsa(BsaCell::try_new(mmap, |mmap| directory::parse(mmap))?))
+    }
+
+    fn dir(&self) -> &Directory<'_> {
+        self.0.borrow_dependent()
     }
 
     /// The archive's layout version — [`VERSION_TES3`] for anything that opens.
     pub fn version(&self) -> u32 {
-        self.dir.version
+        self.dir().version()
     }
 
     /// Number of archived files.
     pub fn len(&self) -> usize {
-        self.dir.count
+        self.dir().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.dir.count == 0
+        self.len() == 0
     }
 
     /// Directory entry `i` (entries are ordered by [`name_hash`]). Panics if `i` is out
     /// of range, like indexing.
     pub fn file(&self, i: usize) -> FileRecord<'_> {
-        assert!(i < self.dir.count, "file index {i} out of range");
-        self.dir.record(&self.mmap, i)
+        assert!(i < self.len(), "file index {i} out of range");
+        self.dir().record(i)
     }
 
     /// Iterate over all directory entries.
     pub fn files(&self) -> impl ExactSizeIterator<Item = FileRecord<'_>> {
-        (0..self.dir.count).map(|i| self.dir.record(&self.mmap, i))
+        let dir = self.dir();
+        (0..dir.len()).map(|i| dir.record(i))
     }
 
     /// The raw bytes for `record`, as a zero-copy slice into the archive mapping.
     pub fn bytes(&self, record: FileRecord<'_>) -> &[u8] {
-        let start = self.dir.data_start + record.offset as usize;
-        &self.mmap[start..start + record.size as usize]
+        self.dir().bytes(record)
     }
 
     /// Look up a file by path, case-insensitively and tolerant of `/` vs `\` separators.
@@ -95,8 +108,17 @@ impl Bsa {
     /// possibility of a 64-bit hash collision resolving a name the archive doesn't
     /// contain.
     pub fn get(&self, name: &str) -> Option<&[u8]> {
-        let i = self.dir.find(&self.mmap, name_hash(name))?;
-        Some(self.bytes(self.dir.record(&self.mmap, i)))
+        let dir = self.dir();
+        Some(dir.bytes(dir.record(dir.find(name_hash(name))?)))
+    }
+}
+
+impl fmt::Debug for Bsa {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Bsa")
+            .field("version", &self.version())
+            .field("files", &self.len())
+            .finish_non_exhaustive()
     }
 }
 

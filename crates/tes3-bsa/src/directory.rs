@@ -15,9 +15,10 @@
 //! `12 + hash_offset + count × 8`; file `offset`s are relative to it.
 //!
 //! [`parse`] validates the whole geometry up front — tables in bounds, name offsets
-//! inside the blob, hash table sorted, data extents inside the archive. [`Directory`]
-//! then serves [`FileRecord`] views and hash lookups straight out of the archive bytes,
-//! with no copies and no failure paths.
+//! inside the blob, hash table sorted, data extents inside the archive — and returns a
+//! [`Directory`] borrowing each section as a slice. Every accessor after that serves
+//! [`FileRecord`] views, hash lookups and file bytes straight out of those slices, with
+//! no copies and no failure paths.
 
 use nom::IResult;
 use nom::number::complete::le_u32;
@@ -72,73 +73,78 @@ pub struct FileRecord<'a> {
     pub size: u32,
 }
 
-/// The validated geometry of an archive's directory: table positions only, no borrowed
-/// data — so [`Bsa`](crate::Bsa) can own both the mapping and the directory without
-/// self-reference. Produced by [`parse`]; every accessor is infallible on the bytes it
-/// was parsed from.
-#[derive(Debug)]
-pub(crate) struct Directory {
-    pub(crate) version: u32,
-    /// Number of archived files.
-    pub(crate) count: usize,
-    /// Length of the name blob (`hash_offset − count × 12`).
-    names_len: usize,
-    /// Absolute byte offset at which the file data section begins.
-    pub(crate) data_start: usize,
+/// An archive's validated directory: each section of the layout above, plus the data
+/// section, borrowed as a slice. Produced by [`parse`]; every accessor is infallible,
+/// because the geometry was checked up front. [`Bsa`](crate::Bsa) couples a `Directory`
+/// to the mmap it borrows from via `self_cell`.
+pub(crate) struct Directory<'a> {
+    version: u32,
+    /// `(u32 size, u32 offset)` per file; offsets are relative to `data`.
+    sizes: &'a [u8],
+    /// `u32` offset of each name within `names`.
+    name_offsets: &'a [u8],
+    /// The name blob: NUL-terminated Windows-1252 paths.
+    names: &'a [u8],
+    /// The hash table: each name's [`name_hash`] as two `u32` halves, sorted.
+    hashes: &'a [u8],
+    /// The file data section.
+    data: &'a [u8],
 }
 
-impl Directory {
-    fn size_table<'a>(&self, archive: &'a [u8]) -> &'a [u8] {
-        &archive[HEADER_LEN..HEADER_LEN + self.count * 8]
+impl<'a> Directory<'a> {
+    pub(crate) fn version(&self) -> u32 {
+        self.version
     }
 
-    fn name_offset_table<'a>(&self, archive: &'a [u8]) -> &'a [u8] {
-        let start = HEADER_LEN + self.count * 8;
-        &archive[start..start + self.count * 4]
+    /// Number of archived files.
+    pub(crate) fn len(&self) -> usize {
+        self.name_offsets.len() / 4
     }
 
-    fn name_blob<'a>(&self, archive: &'a [u8]) -> &'a [u8] {
-        let start = HEADER_LEN + self.count * 12;
-        &archive[start..start + self.names_len]
-    }
+    /// Decode entry `i` as a zero-copy view. Panics if `i >= self.len()`.
+    pub(crate) fn record(&self, i: usize) -> FileRecord<'a> {
+        let size = u32_at(self.sizes, i * 8);
+        let offset = u32_at(self.sizes, i * 8 + 4);
 
-    fn hash_table<'a>(&self, archive: &'a [u8]) -> &'a [u8] {
-        let start = HEADER_LEN + self.count * 12 + self.names_len;
-        &archive[start..start + self.count * 8]
-    }
-
-    /// Decode entry `i` as a zero-copy view. Panics if `i >= self.count` or `archive` is
-    /// not the byte stream this directory was parsed from.
-    pub(crate) fn record<'a>(&self, archive: &'a [u8], i: usize) -> FileRecord<'a> {
-        let sizes = self.size_table(archive);
-        let size = u32_at(sizes, i * 8);
-        let offset = u32_at(sizes, i * 8 + 4);
-
-        let name_off = u32_at(self.name_offset_table(archive), i * 4) as usize;
-        let name = &self.name_blob(archive)[name_off..];
+        let name_off = u32_at(self.name_offsets, i * 4) as usize;
+        let name = &self.names[name_off..];
         let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
 
         FileRecord {
             name: L1Str::from_bytes(&name[..end]),
-            hash: hash_at(self.hash_table(archive), i),
+            hash: hash_at(self.hashes, i),
             offset,
             size,
         }
     }
 
     /// Binary-search the hash table for `hash`, returning the entry index on a hit.
-    pub(crate) fn find(&self, archive: &[u8], hash: u64) -> Option<usize> {
-        let hashes = self.hash_table(archive);
-        let (mut lo, mut hi) = (0, self.count);
+    pub(crate) fn find(&self, hash: u64) -> Option<usize> {
+        let (mut lo, mut hi) = (0, self.len());
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            if hash_at(hashes, mid) < hash {
+            if hash_at(self.hashes, mid) < hash {
                 lo = mid + 1;
             } else {
                 hi = mid;
             }
         }
-        (lo < self.count && hash_at(hashes, lo) == hash).then_some(lo)
+        (lo < self.len() && hash_at(self.hashes, lo) == hash).then_some(lo)
+    }
+
+    /// The raw bytes for `record`, as a zero-copy slice of the data section.
+    pub(crate) fn bytes(&self, record: FileRecord<'_>) -> &'a [u8] {
+        &self.data[record.offset as usize..][..record.size as usize]
+    }
+}
+
+/// Compact by hand: a derived impl would dump the borrowed tables byte by byte.
+impl std::fmt::Debug for Directory<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Directory")
+            .field("version", &self.version)
+            .field("files", &self.len())
+            .finish_non_exhaustive()
     }
 }
 
@@ -159,11 +165,11 @@ fn header(input: &[u8]) -> IResult<&[u8], (u32, u32, u32)> {
     Ok((input, (version, hash_offset, count)))
 }
 
-/// Parse and validate an archive's directory. After this succeeds, every [`Directory`]
-/// accessor on the same bytes is panic-free: all table bounds, name offsets, and data
-/// extents have been checked, and the hash table is verified sorted (the binary-search
-/// precondition).
-pub(crate) fn parse(archive: &[u8]) -> Result<Directory, BsaError> {
+/// Parse and validate an archive's directory into borrowed section slices. After this
+/// succeeds, every [`Directory`] accessor is panic-free: all table bounds, name offsets,
+/// and data extents have been checked, and the hash table is verified sorted (the
+/// binary-search precondition).
+pub(crate) fn parse(archive: &[u8]) -> Result<Directory<'_>, BsaError> {
     let (_, (version, hash_offset, count)) =
         header(archive).map_err(|_| BsaError::Parse("truncated BSA header".into()))?;
     if version != VERSION_TES3 {
@@ -188,21 +194,22 @@ pub(crate) fn parse(archive: &[u8]) -> Result<Directory, BsaError> {
 
     let dir = Directory {
         version,
-        count,
-        names_len,
-        data_start,
+        sizes: &archive[HEADER_LEN..HEADER_LEN + count * 8],
+        name_offsets: &archive[HEADER_LEN + count * 8..HEADER_LEN + count * 12],
+        names: &archive[HEADER_LEN + count * 12..HEADER_LEN + count * 12 + names_len],
+        hashes: &archive[HEADER_LEN + hash_offset..data_start],
+        data: &archive[data_start..],
     };
-    let data_len = (archive.len() - data_start) as u64;
     let mut prev_hash = 0;
     for i in 0..count {
-        let name_off = u32_at(dir.name_offset_table(archive), i * 4) as usize;
-        if name_off > names_len {
+        let name_off = u32_at(dir.name_offsets, i * 4) as usize;
+        if name_off > dir.names.len() {
             return Err(BsaError::Parse(format!(
                 "BSA entry {i}: name offset {name_off} outside the name blob"
             )));
         }
-        let record = dir.record(archive, i);
-        if record.offset as u64 + record.size as u64 > data_len {
+        let record = dir.record(i);
+        if record.offset as u64 + record.size as u64 > dir.data.len() as u64 {
             return Err(BsaError::Parse(format!(
                 "BSA entry {i}: data extends past the end of the archive"
             )));
@@ -274,23 +281,23 @@ mod tests {
     fn parses_and_serves_records() {
         let archive = build_archive(FILES);
         let dir = parse(&archive).expect("valid archive");
-        assert_eq!(dir.version, VERSION_TES3);
-        assert_eq!(dir.count, 2);
+        assert_eq!(dir.version(), VERSION_TES3);
+        assert_eq!(dir.len(), 2);
         assert_eq!(
-            dir.data_start,
-            archive.len() - FILES.iter().map(|(_, d)| d.len()).sum::<usize>()
+            dir.data.len(),
+            FILES.iter().map(|(_, d)| d.len()).sum::<usize>()
         );
 
         for &(name, data, ..) in FILES {
             let i = dir
-                .find(&archive, name_hash(name))
+                .find(name_hash(name))
                 .unwrap_or_else(|| panic!("{name} should be found"));
-            let record = dir.record(&archive, i);
+            let record = dir.record(i);
             assert_eq!(record.name, name);
             assert_eq!(record.hash, name_hash(name));
-            assert_eq!(record.size as usize, data.len());
+            assert_eq!(dir.bytes(record), data);
         }
-        assert_eq!(dir.find(&archive, name_hash("nowhere.nif")), None);
+        assert_eq!(dir.find(name_hash("nowhere.nif")), None);
     }
 
     #[test]
