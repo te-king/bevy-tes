@@ -123,23 +123,27 @@ fn run_bsa(path: &Path, limit: Option<usize>) -> ExitCode {
         Err(e) => return fail(path, &e),
     };
 
-    let total: u64 = bsa.files.iter().map(|f| f.size as u64).sum();
+    let total: u64 = bsa.files().map(|(_, data)| data.len() as u64).sum();
     println!(
         "Archive: {}  (version {:#x}, {} files, {} bytes of data)",
         path.display(),
-        bsa.version,
-        bsa.files.len(),
+        bsa.version(),
+        bsa.len(),
         total
     );
 
-    let shown = limit.unwrap_or(bsa.files.len()).min(bsa.files.len());
-    for f in &bsa.files[..shown] {
-        println!("{:>10}  {}", f.size, f.name);
+    // The directory is a hash map, so sort for a stable listing.
+    let mut entries: Vec<_> = bsa.files().collect();
+    entries.sort_by_key(|(name, _)| name.as_bytes());
+
+    let shown = limit.unwrap_or(entries.len()).min(entries.len());
+    for (name, data) in &entries[..shown] {
+        println!("{:>10}  {}", data.len(), name);
     }
-    if shown < bsa.files.len() {
+    if shown < entries.len() {
         println!(
             "... {} more (use --limit to show more)",
-            bsa.files.len() - shown
+            entries.len() - shown
         );
     }
     ExitCode::SUCCESS
@@ -178,8 +182,8 @@ fn run_extract_all(archive: &Path, out_dir: &Path) -> ExitCode {
 
     let mut files = 0u64;
     let mut total = 0u64;
-    for f in &bsa.files {
-        let name = f.name.decode();
+    for (name, data) in bsa.files() {
+        let name = name.decode();
         let Some(rel) = safe_relative_path(&name) else {
             eprintln!("skipping unsafe entry name: {name}");
             continue;
@@ -190,7 +194,6 @@ fn run_extract_all(archive: &Path, out_dir: &Path) -> ExitCode {
         {
             return fail(parent, &e);
         }
-        let data = bsa.bytes(f);
         if let Err(e) = std::fs::write(&dest, data) {
             return fail(&dest, &e);
         }

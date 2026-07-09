@@ -4357,6 +4357,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "self_cell"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b12e76d157a900eb52e81bc6e9f3069344290341720e9178cde2407113ac8d89"
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4686,6 +4692,7 @@ dependencies = [
  "clap",
  "memmap2",
  "nom",
+ "self_cell",
  "tes-core",
  "tes-testdata",
  "tes3-esm",
