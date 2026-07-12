@@ -21,11 +21,16 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
 use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::atmosphere::ScatteringMedium;
-use bevy::light::{Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder};
+use bevy::light::{
+    Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, ShadowFilteringMethod,
+};
 use bevy::pbr::{AtmosphereSettings, ScreenSpaceAmbientOcclusion};
+use bevy::post_process::auto_exposure::{AutoExposure, AutoExposurePlugin};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
@@ -114,8 +119,9 @@ fn main() -> ExitCode {
             }),
             ..default()
         }))
-        // TerrainPlugin goes after DefaultPlugins (it registers a render material).
-        .add_plugins((TerrainPlugin, FreeCameraPlugin));
+        // TerrainPlugin goes after DefaultPlugins (it registers a render material);
+        // AutoExposurePlugin isn't part of DefaultPlugins.
+        .add_plugins((TerrainPlugin, FreeCameraPlugin, AutoExposurePlugin));
     } else {
         // Screenshot mode: a hidden window is enough to drive the render target; we
         // capture one frame and exit. `close_when_requested` is off so nothing races our
@@ -135,8 +141,9 @@ fn main() -> ExitCode {
             close_when_requested: false,
             ..default()
         }))
-        // TerrainPlugin goes after DefaultPlugins (it registers a render material).
-        .add_plugins(TerrainPlugin)
+        // TerrainPlugin goes after DefaultPlugins (it registers a render material);
+        // AutoExposurePlugin isn't part of DefaultPlugins.
+        .add_plugins((TerrainPlugin, AutoExposurePlugin))
         .insert_resource(Capture { path })
         .init_resource::<CaptureDone>()
         .add_systems(Update, capture);
@@ -305,9 +312,23 @@ fn frame_cell(
         ScreenSpaceAmbientOcclusion::default(),
         // Alpha-masked vegetation shimmers under MSAA (it can't help alpha-tested
         // edges); TAA resolves those. Converges over a few frames — screenshot mode
-        // already waits several frames after framing.
+        // waits for it. CAS recovers the crispness TAA softens away.
         TemporalAntiAliasing::default(),
         Msaa::Off,
+        ContrastAdaptiveSharpening::default(),
+        // Softer sun-shadow edges, using the TAA-aware filter.
+        ShadowFilteringMethod::Temporal,
+        // Punchier filmic tonemapper than the default TonyMcMapface.
+        Tonemapping::AcesFitted,
+        // Eye adaptation: meters the frame and drifts exposure toward mid-grey, so the
+        // shared interior/exterior staging each land at a sane brightness. Adapts over
+        // ~a second — screenshot mode waits for it too. Metering only the brighter
+        // half of the histogram keeps the moody, darker-than-mid-grey look from being
+        // "corrected" into overexposure.
+        AutoExposure {
+            filter: 0.50..=0.95,
+            ..default()
+        },
     ));
     if capture.is_none() {
         // Bevy's free camera; the controller logs its controls on the first frame. The
@@ -343,9 +364,9 @@ fn frame_cell(
     framed.0 = true;
 }
 
-/// Screenshot-mode driver: once the cell is framed, let a few frames render so texture
-/// uploads land, request one screenshot, then exit once its observer reports the PNG has
-/// been written.
+/// Screenshot-mode driver: once the cell is framed, let the frame settle — texture
+/// uploads, TAA convergence, auto-exposure adaptation (the slowest, ~a second) — then
+/// request one screenshot and exit once its observer reports the PNG has been written.
 fn capture(
     mut commands: Commands,
     capture: Res<Capture>,
@@ -360,7 +381,7 @@ fn capture(
     }
     *frames_since_framed += 1;
 
-    if *frames_since_framed == 8 && !*shot_requested {
+    if *frames_since_framed == 90 && !*shot_requested {
         *shot_requested = true;
         commands
             .spawn(Screenshot::primary_window())
