@@ -25,6 +25,15 @@ impl L1Str {
         unsafe { &*(bytes as *const [u8] as *const L1Str) }
     }
 
+    pub fn from_bytes_until_null(bytes: &[u8]) -> &L1Str {
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        let bytes = &bytes[..end];
+        // SAFETY: `L1Str` is `repr(transparent)` over `[u8]`, so a `&[u8]` and a
+        // `&L1Str` have identical layout (including the length metadata), and every
+        // byte sequence is a valid Windows-1252 string.
+        unsafe { &*(bytes as *const [u8] as *const L1Str) }
+    }
+
     /// The underlying Windows-1252 bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0

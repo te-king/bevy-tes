@@ -10,6 +10,7 @@ repository.workspace = true
 tes-core = { workspace = true }
 thiserror = { workspace = true }
 nom = { workspace = true }
+self_cell = { workspace = true }
 memmap2 = "0.9"
 
 [dev-dependencies]

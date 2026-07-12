@@ -251,15 +251,21 @@ impl Plugin for BethPlugin {
             "BethPlugin must be added before Bevy's AssetPlugin (add it before DefaultPlugins)"
         );
 
+        // FileAssetReader (which TesVfsReader delegates loose reads to) resolves relative
+        // roots against Bevy's base path — the executable's directory — not the working
+        // directory. Absolutize once so the reader and the VFS index agree on one tree.
+        let data_root =
+            std::path::absolute(&self.data_root).unwrap_or_else(|_| self.data_root.clone());
+
         let vfs = match &self.archives {
-            Some(list) => TesVfs::new(&self.data_root, list),
-            None => TesVfs::open(&self.data_root),
+            Some(list) => TesVfs::new(&data_root, list),
+            None => TesVfs::open(&data_root),
         };
         let vfs = Arc::new(vfs.unwrap_or_else(|e| {
             // Keep dataless apps (tests, fresh checkouts) bootable: loads just miss.
             eprintln!(
                 "bevy-beth: cannot open data root {}: {e}; `tes://` loads will find nothing",
-                self.data_root.display()
+                data_root.display()
             );
             TesVfs::empty()
         }));
@@ -267,7 +273,7 @@ impl Plugin for BethPlugin {
         app.insert_resource(TesVfsHandle(vfs.clone()));
         app.register_asset_source(
             AssetSourceId::from(TES_SOURCE),
-            AssetSourceBuilder::new(move || Box::new(TesVfsReader(vfs.clone()))),
+            AssetSourceBuilder::new(move || Box::new(TesVfsReader::new(vfs.clone(), &data_root))),
         );
     }
 

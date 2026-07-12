@@ -202,7 +202,7 @@ fn model_path(model: Option<&L1Str>) -> Option<String> {
     if model.is_empty() {
         return None;
     }
-    Some(tes_core::paths::normalize(&model.decode()))
+    Some(tes_core::tes_path::normalize(&model.decode()))
 }
 
 #[cfg(test)]

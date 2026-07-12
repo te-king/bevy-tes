@@ -18,10 +18,9 @@ fn parses_a_static_mesh_with_geometry() {
     // Find the first `.nif` that carries drawable geometry (a handful are pure particle
     // effects with none).
     let parsed = bsa
-        .files
-        .iter()
-        .filter(|f| f.name.decode().to_ascii_lowercase().ends_with(".nif"))
-        .filter_map(|f| Nif::parse(bsa.bytes(f)).ok())
+        .files()
+        .filter(|(name, _)| name.decode().to_ascii_lowercase().ends_with(".nif"))
+        .filter_map(|(_, data)| Nif::parse(data).ok())
         .find(|nif| !nif.instances().is_empty())
         .expect("at least one .nif parses with geometry");
 
@@ -47,13 +46,13 @@ fn every_archived_mesh_parses() {
     };
     let mut total = 0;
     let mut with_geometry = 0;
-    for f in &bsa.files {
-        let name = f.name.decode();
+    for (name, data) in bsa.files() {
+        let name = name.decode();
         if !name.to_ascii_lowercase().ends_with(".nif") {
             continue;
         }
         total += 1;
-        let nif = Nif::parse(bsa.bytes(f)).unwrap_or_else(|e| panic!("parse {name}: {e}"));
+        let nif = Nif::parse(data).unwrap_or_else(|e| panic!("parse {name}: {e}"));
         if !nif.instances().is_empty() {
             with_geometry += 1;
         }

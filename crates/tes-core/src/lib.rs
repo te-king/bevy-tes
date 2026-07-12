@@ -9,12 +9,14 @@
 //!   parsers tolerantly.
 //! - [`math`] — plain numeric primitives (currently just [`math::Color`]). Deliberately
 //!   Bevy/`glam`-free; downstream crates convert these into engine types.
-//! - [`paths`] — the game-data path normal form (case-insensitive, `\`-separated)
-//!   shared by every index that looks paths up.
+//! - [`tes_path`] — the game-data path normal form (case-insensitive, `\`-separated)
+//!   shared by every index that looks paths up, and [`TesPath`]/[`TesPathBuf`], the
+//!   borrowed/owned view types that compare and hash in that form.
 
 pub mod bytes;
 pub mod latin1;
 pub mod math;
-pub mod paths;
+pub mod tes_path;
 
 pub use latin1::{L1Str, L1String};
+pub use tes_path::{TesPath, TesPathBuf};

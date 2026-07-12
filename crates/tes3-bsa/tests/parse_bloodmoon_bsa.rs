@@ -10,8 +10,8 @@ fn open_bsa() -> Option<Bsa> {
 #[test]
 fn parses_archive() {
     let Some(bsa) = open_bsa() else { return };
-    assert_eq!(bsa.version, 0x100);
-    assert_eq!(bsa.files.len(), 1_545);
+    assert_eq!(bsa.version(), 0x100);
+    assert_eq!(bsa.len(), 1_545);
 
     let tex = bsa
         .get(r"textures\c_nordic02_upperarm.dds")
@@ -22,12 +22,11 @@ fn parses_archive() {
 #[test]
 fn dds_textures_have_the_dds_magic() {
     let Some(bsa) = open_bsa() else { return };
-    let dds = bsa
-        .files
-        .iter()
-        .find(|f| f.name.decode().to_ascii_lowercase().ends_with(".dds"))
+    let (_, dds) = bsa
+        .files()
+        .find(|(name, _)| name.decode().to_ascii_lowercase().ends_with(".dds"))
         .expect("archive contains textures");
-    assert_eq!(&bsa.bytes(dds)[..4], b"DDS ");
+    assert_eq!(&dds[..4], b"DDS ");
 }
 
 /// Fold bytes into a checksum fast enough to stay memory-bandwidth bound, so the read
@@ -55,9 +54,8 @@ fn parse_timing() {
     };
     let total_data: usize = Bsa::open(&path)
         .expect("open bsa")
-        .files
-        .iter()
-        .map(|f| f.size as usize)
+        .files()
+        .map(|(_, data)| data.len())
         .sum();
     const ITERATIONS: u32 = 20;
 
@@ -69,12 +67,12 @@ fn parse_timing() {
         let start = Instant::now();
         let bsa = Bsa::open(&path).expect("open should succeed");
         let mut acc = 0u64;
-        for f in &bsa.files {
-            acc = fold(acc, bsa.bytes(f));
+        for (_, data) in bsa.files() {
+            acc = fold(acc, data);
         }
         let elapsed = start.elapsed();
         checksum ^= acc;
-        file_count = bsa.files.len();
+        file_count = bsa.len();
         total += elapsed;
         best = best.min(elapsed);
     }

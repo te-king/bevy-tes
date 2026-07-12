@@ -10,8 +10,8 @@ fn open_bsa() -> Option<Bsa> {
 #[test]
 fn parses_archive() {
     let Some(bsa) = open_bsa() else { return };
-    assert_eq!(bsa.version, 0x100);
-    assert_eq!(bsa.files.len(), 11_090);
+    assert_eq!(bsa.version(), 0x100);
+    assert_eq!(bsa.len(), 11_090);
 
     // Reference entry from an independent directory scan.
     let probe = bsa
@@ -26,10 +26,10 @@ fn parses_archive() {
 #[test]
 fn every_entry_has_a_name_and_data() {
     let Some(bsa) = open_bsa() else { return };
-    for f in &bsa.files {
-        assert!(!f.name.is_empty(), "every entry should have a name");
+    for (name, _) in bsa.files() {
+        assert!(!name.is_empty(), "every entry should have a name");
     }
-    let total: usize = bsa.files.iter().map(|f| bsa.bytes(f).len()).sum();
+    let total: usize = bsa.files().map(|(_, data)| data.len()).sum();
     assert!(total > 0, "archive should contain file data");
 }
 
@@ -38,12 +38,11 @@ fn dds_textures_have_the_dds_magic() {
     let Some(bsa) = open_bsa() else { return };
     // Spot-check that a .dds entry's bytes really are a DDS file ("DDS " magic),
     // proving the size/offset resolution lands on the right data.
-    let dds = bsa
-        .files
-        .iter()
-        .find(|f| f.name.decode().to_ascii_lowercase().ends_with(".dds"))
+    let (_, dds) = bsa
+        .files()
+        .find(|(name, _)| name.decode().to_ascii_lowercase().ends_with(".dds"))
         .expect("archive contains textures");
-    assert_eq!(&bsa.bytes(dds)[..4], b"DDS ");
+    assert_eq!(&dds[..4], b"DDS ");
 }
 
 /// Fold bytes into a checksum fast enough to stay memory-bandwidth bound, so the read
@@ -72,9 +71,8 @@ fn parse_timing() {
     };
     let total_data: usize = Bsa::open(&path)
         .expect("open bsa")
-        .files
-        .iter()
-        .map(|f| f.size as usize)
+        .files()
+        .map(|(_, data)| data.len())
         .sum();
     const ITERATIONS: u32 = 20;
 
@@ -86,12 +84,12 @@ fn parse_timing() {
         let start = Instant::now();
         let bsa = Bsa::open(&path).expect("open should succeed");
         let mut acc = 0u64;
-        for f in &bsa.files {
-            acc = fold(acc, bsa.bytes(f));
+        for (_, data) in bsa.files() {
+            acc = fold(acc, data);
         }
         let elapsed = start.elapsed();
         checksum ^= acc;
-        file_count = bsa.files.len();
+        file_count = bsa.len();
         total += elapsed;
         best = best.min(elapsed);
     }
