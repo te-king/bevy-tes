@@ -12,9 +12,8 @@
 //! Pass `-o out.png` to choose where the screenshot lands, `--data <dir>` for a
 //! non-default data directory, `--dark` to stage a night scene (self-illumination such
 //! as glow maps stands out against moonlight-level lighting), or `--interactive` to
-//! instead open a live window with a fly camera: hold the right mouse button to look,
-//! WASD to fly, Space/Q for up/down, Shift to go faster, scroll to rescale the base
-//! speed.
+//! instead open a live window with Bevy's free camera: hold the right mouse button to
+//! look, WASD to fly, E/Q for up/down, Shift to run, scroll to rescale the base speed.
 //!
 //! All the loading heavy lifting — scene-graph traversal, texture resolution through
 //! loose files and archives, material construction — happens inside `bevy_beth`'s NIF
@@ -24,6 +23,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
@@ -33,10 +33,6 @@ use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use clap::Parser;
 
 use bevy_beth::{BethPlugin, NifAsset};
-
-#[path = "helpers/fly_cam.rs"]
-mod fly_cam;
-use fly_cam::{FreeCam, free_cam};
 
 /// Render a TES3 `.nif` model with Bevy.
 #[derive(Parser, Debug)]
@@ -115,7 +111,7 @@ fn main() -> ExitCode {
             }),
             ..default()
         }))
-        .add_systems(Update, free_cam);
+        .add_plugins(FreeCameraPlugin);
     } else {
         // Screenshot mode: a hidden window is enough to drive the render target; we
         // capture one frame and exit. `close_when_requested` is off so nothing races our
@@ -321,17 +317,14 @@ fn frame_scene(
         },
     ));
     if capture.is_none() {
-        // Fly camera, starting from the framing view; base speed crosses the model in a
-        // couple of seconds regardless of its scale.
-        let (yaw, pitch, _) = camera_transform.rotation.to_euler(EulerRot::YXZ);
-        camera.insert(FreeCam {
-            yaw,
-            pitch,
-            speed: r * 1.5,
+        // Bevy's free camera, starting from the framing view (the controller adopts the
+        // camera's rotation and logs its controls on the first frame). Base speed
+        // crosses the model in a couple of seconds regardless of its scale.
+        camera.insert(FreeCamera {
+            walk_speed: r * 1.5,
+            run_speed: r * 6.0,
+            ..default()
         });
-        println!(
-            "Controls: hold RMB to look, WASD to fly, Space/Q up/down, Shift boost, scroll for speed"
-        );
     }
 
     // Key light: casts shadows, with the cascade sized to the model so the shadow map has
