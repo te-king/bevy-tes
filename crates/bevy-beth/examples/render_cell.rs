@@ -21,10 +21,11 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
 use bevy::light::atmosphere::ScatteringMedium;
-use bevy::light::{Atmosphere, CascadeShadowConfigBuilder};
-use bevy::pbr::AtmosphereSettings;
+use bevy::light::{Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder};
+use bevy::pbr::{AtmosphereSettings, ScreenSpaceAmbientOcclusion};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
@@ -229,7 +230,8 @@ fn frame_cell(
     let r = ((max - min).length() * 0.5).max(100.0);
 
     // Stage per cell kind: interiors are lit by their authored ambient plus the placed
-    // lights; exteriors get daylight and a shadow-casting sun.
+    // lights; exteriors get daylight and a shadow-casting sun, with their ambient
+    // supplied by the sky's environment map (below) instead of a flat term.
     let ambient = if environment.interior {
         // The authored AMBI colour is dark in linear space (the game adds it in gamma
         // space), so the scalar is large: it reproduces the game's ~15% brightness floor
@@ -240,8 +242,10 @@ fn frame_cell(
             ..default()
         }
     } else {
+        // Zero, not absent: an absent component would fall back to Bevy's global
+        // default ambient on top of the sky light.
         AmbientLight {
-            brightness: 300.0,
+            brightness: 0.0,
             ..default()
         }
     };
@@ -293,6 +297,17 @@ fn frame_cell(
         // Renders the sky (and implies an HDR camera); bloom gives the sun a disk.
         AtmosphereSettings::default(),
         Bloom::NATURAL,
+        // Sky-driven image-based lighting: ambient diffuse comes from the atmosphere's
+        // generated environment map (blue from above, responding to sun angle).
+        AtmosphereEnvironmentMapLight::default(),
+        // Contact shadows in clutter and under eaves. Requires (and auto-adds) the
+        // depth/normal prepasses; both SSAO and TAA require MSAA off.
+        ScreenSpaceAmbientOcclusion::default(),
+        // Alpha-masked vegetation shimmers under MSAA (it can't help alpha-tested
+        // edges); TAA resolves those. Converges over a few frames — screenshot mode
+        // already waits several frames after framing.
+        TemporalAntiAliasing::default(),
+        Msaa::Off,
     ));
     if capture.is_none() {
         // Bevy's free camera; the controller logs its controls on the first frame. The
