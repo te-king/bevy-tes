@@ -12,18 +12,20 @@ use bevy::ecs::hierarchy::ChildOf;
 use bevy::light::PointLight;
 use bevy::math::{Quat, Vec3};
 use bevy::mesh::{Mesh, Mesh3d};
+use bevy::pbr::{MeshMaterial3d, StandardMaterial};
 use bevy::transform::components::Transform;
 use bevy::world_serialization::WorldAssetRoot;
 use tes3_esm::records::cell::{Cell, CellData, CellFlags, Reference, ReferenceTransform};
 use tes3_esm::records::crea::Crea;
-use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags};
+use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags, VTEX_GRID};
 use tes3_esm::records::ligh::{Ligh, LightData};
+use tes3_esm::records::ltex::Ltex;
 use tes3_esm::records::stat::Stat;
 use tes3_esm::{L1String, Plugin, Record};
 
 use bevy_beth::{
     CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
-    EsmAsset, EsmIndex,
+    EsmAsset, EsmIndex, TerrainSplatMaterial,
 };
 
 mod common;
@@ -177,15 +179,47 @@ fn synthetic_cell_spawns_and_skips() {
     assert_eq!(water_transform.translation.y, 50.0);
 }
 
+/// Re-swizzle a logical row-major 16×16 grid (south-west origin) into `VTEX` storage
+/// order — 4×4 blocks of 4×4 texels, the inverse of `Land::decode_textures` — so the
+/// spawn path exercises the de-swizzle end-to-end.
+fn vtex_bytes(logical: &[u16; VTEX_GRID * VTEX_GRID]) -> Vec<u8> {
+    let mut stored = [0u16; VTEX_GRID * VTEX_GRID];
+    for (stored_pos, slot) in stored.iter_mut().enumerate() {
+        let (block, texel) = (stored_pos / 16, stored_pos % 16);
+        let (bx, by) = (block % 4, block / 4);
+        let (tx, ty) = (texel % 4, texel / 4);
+        *slot = logical[(by * 4 + ty) * VTEX_GRID + (bx * 4 + tx)];
+    }
+    stored.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
 /// A plugin with one exterior cell at grid (1, 2): a placed static plus a LAND record
 /// whose terrain sits uniformly below sea level (offset −10 → all heights −80).
-fn synthetic_exterior_asset() -> EsmAsset {
+///
+/// With `vtex`, the LAND also carries a texture grid — value 1 (LTEX 0, `tx_a.dds`)
+/// everywhere except texel (5, 9), which is value 2 (LTEX 1, `tx_b.dds`).
+fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
+    let texture_data = vtex.then(|| {
+        let mut logical = [1u16; VTEX_GRID * VTEX_GRID];
+        logical[9 * VTEX_GRID + 5] = 2;
+        vtex_bytes(&logical)
+    });
     let plugin = Plugin {
         header: Default::default(),
         records: vec![
             Record::Stat(Stat {
                 id: l1("test_stat"),
                 model: l1(r"x\nowhere.nif"),
+            }),
+            Record::Ltex(Ltex {
+                id: l1("tex_a"),
+                index: 0,
+                texture: l1("tx_a.dds"),
+            }),
+            Record::Ltex(Ltex {
+                id: l1("tex_b"),
+                index: 1,
+                texture: l1("tx_b.dds"),
             }),
             Record::Cell(Cell {
                 data: CellData {
@@ -199,9 +233,10 @@ fn synthetic_exterior_asset() -> EsmAsset {
             Record::Land(Land {
                 grid_x: 1,
                 grid_y: 2,
-                data_types: LandFlags::HAS_HEIGHTS,
+                data_types: LandFlags::HAS_HEIGHTS | LandFlags::HAS_TEXTURES,
                 height_offset: Some(-10.0),
                 heights: Some(vec![0; LAND_GRID * LAND_GRID]),
+                texture_data,
                 ..Default::default()
             }),
         ],
@@ -216,7 +251,7 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
     let handle = app
         .world_mut()
         .resource_mut::<Assets<EsmAsset>>()
-        .add(synthetic_exterior_asset());
+        .add(synthetic_exterior_asset(true));
 
     let seed = app
         .world_mut()
@@ -264,6 +299,56 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
         water_transform.translation,
         Vec3::new(8192.0 + 4096.0, 0.0, -(16384.0 + 4096.0))
     );
+
+    // The VTEX grid became a splat material: two distinct textures in first-appearance
+    // order (both unresolvable here, so white stand-ins — the layer count still holds),
+    // with the odd texel remapped through the de-swizzle.
+    let mut terrain = app
+        .world_mut()
+        .query::<(&CellTerrain, &MeshMaterial3d<TerrainSplatMaterial>)>();
+    let (_, material) = terrain
+        .iter(app.world())
+        .next()
+        .expect("terrain carries the splat material");
+    let material = material.0.clone();
+    let splats = app.world().resource::<Assets<TerrainSplatMaterial>>();
+    let splat = splats.get(&material).expect("splat material stored");
+    assert_eq!(splat.layers.len(), 2);
+    assert_eq!(splat.indices[0], 0, "the dominant texture takes slot 0");
+    assert_eq!(
+        splat.indices[9 * VTEX_GRID + 5],
+        1,
+        "texel (5,9) is layer 1"
+    );
+    assert_eq!(splat.indices.iter().filter(|&&s| s == 1).count(), 1);
+}
+
+#[test]
+fn exterior_without_vtex_keeps_the_plain_material() {
+    let mut app = app_with_assets();
+    let handle = app
+        .world_mut()
+        .resource_mut::<Assets<EsmAsset>>()
+        .add(synthetic_exterior_asset(false));
+
+    let seed = app
+        .world_mut()
+        .spawn(CellSeed {
+            esm: handle,
+            cell: CellId::exterior(1, 2),
+        })
+        .id();
+    pump_until_settled(&mut app, seed);
+
+    // No VTEX grid → the shared vertex-tinted StandardMaterial, not a splat.
+    let mut plain = app
+        .world_mut()
+        .query::<(&CellTerrain, &MeshMaterial3d<StandardMaterial>)>();
+    assert_eq!(plain.iter(app.world()).count(), 1);
+    let mut splat = app
+        .world_mut()
+        .query::<(&CellTerrain, &MeshMaterial3d<TerrainSplatMaterial>)>();
+    assert_eq!(splat.iter(app.world()).count(), 0);
 }
 
 #[test]
@@ -395,7 +480,7 @@ fn exterior_cell_spawns_references() {
 
     // Any well-populated exterior square with terrain will do; find one instead of
     // pinning a grid. Capture the raw VHGT fields for the independent cross-checks.
-    let (grid, expected_first_height, min_height) = {
+    let (grid, expected_first_height, min_height, distinct_textures) = {
         let esms = app.world().resource::<Assets<EsmAsset>>();
         let asset = esms.get(&esm).expect("ESM loaded");
         asset
@@ -415,7 +500,10 @@ fn exterior_cell_spawns_references() {
                         + (land.heights.as_ref().unwrap()[0] as i8) as f32)
                         * HEIGHT_SCALE;
                     let min = heights.into_iter().fold(f32::INFINITY, f32::min);
-                    Some(((c.data.grid_x, c.data.grid_y), first, min))
+                    let distinct = land
+                        .decode_textures()
+                        .map(|grid| grid.iter().collect::<std::collections::HashSet<_>>().len());
+                    Some(((c.data.grid_x, c.data.grid_y), first, min, distinct))
                 }
                 _ => None,
             })
@@ -456,6 +544,22 @@ fn exterior_cell_spawns_references() {
         .unwrap();
     assert_eq!(positions.len(), LAND_GRID * LAND_GRID);
     assert_eq!(positions[0][1], expected_first_height);
+
+    // A vanilla LAND with a VTEX grid gets the splat material, one layer per distinct
+    // texture value.
+    if let Some(distinct) = distinct_textures {
+        let mut splat_terrain = app
+            .world_mut()
+            .query::<(&CellTerrain, &MeshMaterial3d<TerrainSplatMaterial>)>();
+        let (_, material) = splat_terrain
+            .iter(app.world())
+            .next()
+            .expect("vanilla terrain is texture-splatted");
+        let material = material.0.clone();
+        let splats = app.world().resource::<Assets<TerrainSplatMaterial>>();
+        let splat = splats.get(&material).expect("splat material stored");
+        assert_eq!(splat.layers.len(), distinct);
+    }
 
     // Sea-level water appears exactly when the terrain dips below height 0.
     let mut water = app.world_mut().query::<(&CellWater, &Transform)>();

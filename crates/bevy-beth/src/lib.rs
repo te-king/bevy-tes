@@ -82,12 +82,16 @@ pub mod cell;
 pub mod convert;
 #[cfg(feature = "scene")]
 mod scene;
+#[cfg(feature = "scene")]
+pub mod terrain;
 
 #[cfg(feature = "scene")]
 pub use cell::{
     CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
 };
 pub use index::{CellId, EsmIndex, ObjectInfo, ObjectKind};
+#[cfg(feature = "scene")]
+pub use terrain::{TerrainPlugin, TerrainSplatMaterial};
 pub use vfs::{TesVfs, TesVfsReader};
 
 pub use tes_nif;
@@ -218,6 +222,9 @@ impl AssetLoader for NifLoader {
 /// **Must be added before Bevy's `AssetPlugin`** (i.e. before `DefaultPlugins`) — asset
 /// sources can only be registered before the `AssetServer` exists; the plugin asserts
 /// this. See the [crate docs](crate) for a full example.
+///
+/// For texture-splatted terrain, also add [`TerrainPlugin`] **after** `DefaultPlugins`;
+/// without it terrain spawns vertex-tinted white.
 pub struct BethPlugin {
     /// The Morrowind `Data Files` directory the VFS serves (loose files + `*.bsa`).
     pub data_root: PathBuf,
