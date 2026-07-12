@@ -22,7 +22,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
-use bevy::light::CascadeShadowConfigBuilder;
+use bevy::light::atmosphere::ScatteringMedium;
+use bevy::light::{Atmosphere, CascadeShadowConfigBuilder};
+use bevy::pbr::AtmosphereSettings;
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
 use bevy::window::{ExitCondition, WindowResolution};
@@ -163,6 +166,11 @@ fn parse_grid(s: &str) -> Option<(i32, i32)> {
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
 
+/// Game units per meter: Morrowind's 64 units = 1 yard. The atmosphere works in meters,
+/// so the planet entity is scaled by this to keep sky curvature and aerial perspective
+/// at the right world scale.
+const UNITS_PER_METER: f32 = 70.0;
+
 /// Once the cell has spawned and its models have settled, stage the set: camera framed
 /// on the spawned geometry, ambient from the cell's own values, a key light for
 /// exteriors. Runs once; also the failure exit when the cell can't spawn.
@@ -170,6 +178,7 @@ fn parse_grid(s: &str) -> Option<(i32, i32)> {
 fn frame_cell(
     mut commands: Commands,
     mut framed: ResMut<Framed>,
+    mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
     mut settle: Local<(u32, usize, u32)>, // (stable frames, last count, total frames)
     seeds: Query<(&CellSpawned, &CellEnvironment)>,
     failures: Query<&CellSpawnFailed>,
@@ -258,6 +267,19 @@ fn frame_cell(
         Transform::from_translation(center + Vec3::new(r * 0.7, r * 0.8, r * 0.7))
             .looking_at(center, Vec3::Y)
     };
+    // Procedural sky: one earth-like atmosphere, scaled from meters to game units. The
+    // planet center sits `inner_radius` below the origin so the world sits on its
+    // surface (the default-transform hook would do this unscaled; setting a scale means
+    // placing it ourselves). The sky's look is driven by the directional sun below.
+    // Staged for interiors and exteriors alike — an interior only shows it through door
+    // gaps, and per-kind tuning can come later.
+    let atmosphere = Atmosphere::earth(scattering_mediums.add(ScatteringMedium::earth(256, 256)));
+    commands.spawn((
+        Transform::from_translation(-Vec3::Y * atmosphere.inner_radius * UNITS_PER_METER)
+            .with_scale(Vec3::splat(UNITS_PER_METER)),
+        atmosphere,
+    ));
+
     let mut camera = commands.spawn((
         Camera3d::default(),
         camera_transform,
@@ -268,6 +290,9 @@ fn frame_cell(
             ..default()
         }),
         ambient,
+        // Renders the sky (and implies an HDR camera); bloom gives the sun a disk.
+        AtmosphereSettings::default(),
+        Bloom::NATURAL,
     ));
     if capture.is_none() {
         // Bevy's free camera; the controller logs its controls on the first frame. The
