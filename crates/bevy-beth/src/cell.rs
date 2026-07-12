@@ -15,7 +15,10 @@
 //!
 //! Exterior cells also grow a terrain child tagged [`CellTerrain`] — a mesh built from
 //! the cell's `LAND` record (65×65 vertex heights, normals and colors) — plus a sea-level
-//! water plane when the terrain dips below height 0.
+//! water plane when the terrain dips below height 0. When
+//! [`TerrainPlugin`](crate::TerrainPlugin) is added, the terrain is texture-splatted
+//! from the `LAND`'s `VTEX` grid (see [`terrain`](crate::terrain)); otherwise it stays
+//! vertex-tinted white.
 //!
 //! What is *not* spawned (counted in [`CellSpawned::skipped`], logged at debug level):
 //! NPCs and creatures (their NIFs are skinned, which the scene builder doesn't support
@@ -27,9 +30,10 @@
 //! the seed as [`CellEnvironment`] for the app to apply — Bevy's ambient light is
 //! per-camera, so the library doesn't force it.
 
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
-use bevy::asset::{AssetServer, Assets};
+use bevy::asset::{AssetServer, Assets, Handle};
 use bevy::camera::visibility::Visibility;
 use bevy::color::Color;
 use bevy::ecs::component::Component;
@@ -38,19 +42,24 @@ use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::name::Name;
 use bevy::ecs::query::Without;
 use bevy::ecs::system::{Commands, Local, Query, Res, ResMut};
+use bevy::image::{
+    Image, ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
+};
 use bevy::light::PointLight;
 use bevy::material::AlphaMode;
 use bevy::math::primitives::Plane3d;
 use bevy::math::{Vec2, Vec3};
 use bevy::mesh::{Mesh, Mesh3d};
 use bevy::pbr::{MeshMaterial3d, StandardMaterial};
+use bevy::render::renderer::RenderDevice;
 use bevy::transform::components::Transform;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use tes3_esm::records::cell::{Cell, CellFlags, Reference};
-use tes3_esm::records::land::CELL_SIZE;
+use tes3_esm::records::land::{CELL_SIZE, Land, VTEX_GRID};
 use tes3_esm::records::ligh::LightFlags;
 
 use crate::index::{CellId, ObjectKind};
+use crate::terrain::{self, MAX_TERRAIN_LAYERS, TerrainSplatMaterial};
 use crate::{EsmAsset, TesVfsHandle, convert};
 
 /// Point-light lumens per game-unit² of `LightData::radius`. A documented heuristic, not
@@ -128,6 +137,11 @@ type PendingSeeds<'w, 's> =
 
 /// Resolves pending [`CellSeed`]s and spawns their cells. Registered by `BethPlugin`
 /// under the `scene` feature; polls until each seed's ESM loads, then spawns once.
+///
+/// Terrain is texture-splatted when `Assets<TerrainSplatMaterial>` exists (i.e.
+/// [`TerrainPlugin`](crate::TerrainPlugin) — or a test harness — registered it) and the
+/// render device, if any, supports binding arrays; otherwise terrain keeps the plain
+/// vertex-tinted white material.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_cells(
     mut commands: Commands,
@@ -137,9 +151,18 @@ pub fn spawn_cells(
     vfs: Res<TesVfsHandle>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut splat_materials: Option<ResMut<Assets<TerrainSplatMaterial>>>,
+    render_device: Option<Res<RenderDevice>>,
     mut warned: Local<HashSet<String>>,
-    mut terrain_material: Local<Option<bevy::asset::Handle<StandardMaterial>>>,
+    mut terrain_material: Local<Option<Handle<StandardMaterial>>>,
+    mut missing_layer: Local<Option<Handle<Image>>>,
 ) {
+    // Headless apps have no render device — proceed (nothing renders, tests assert on
+    // the material); a device without binding arrays falls back to the white material.
+    let splat_supported = render_device
+        .as_deref()
+        .is_none_or(terrain::splat_supported);
     for (seed_entity, seed) in &seeds {
         let Some(esm) = esms.get(&seed.esm) else {
             if let bevy::asset::LoadState::Failed(e) = asset_server.load_state(&seed.esm) {
@@ -192,6 +215,12 @@ pub fn spawn_cells(
                 &mut meshes,
                 &mut materials,
                 &mut terrain_material,
+                splat_materials.as_deref_mut().filter(|_| splat_supported),
+                &asset_server,
+                &vfs,
+                &mut images,
+                &mut missing_layer,
+                &mut warned,
                 seed_entity,
                 esm,
                 cell.data.grid_x,
@@ -323,12 +352,22 @@ fn environment(cell: &Cell) -> CellEnvironment {
 /// sea-level water decision). Cells without `LAND` — map edges, sparse plugins — skip
 /// silently: that's authored absence, not an error, and (like water) terrain doesn't
 /// count toward the seed's reference tallies.
+///
+/// With `splat_materials` present (the caller's splat gate), a `LAND` with a `VTEX` grid
+/// gets a per-cell [`TerrainSplatMaterial`]; otherwise the shared vertex-tinted white
+/// material.
 #[allow(clippy::too_many_arguments)]
 fn spawn_terrain(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    terrain_material: &mut Option<bevy::asset::Handle<StandardMaterial>>,
+    terrain_material: &mut Option<Handle<StandardMaterial>>,
+    splat_materials: Option<&mut Assets<TerrainSplatMaterial>>,
+    asset_server: &AssetServer,
+    vfs: &TesVfsHandle,
+    images: &mut Assets<Image>,
+    missing_layer: &mut Option<Handle<Image>>,
+    warned: &mut HashSet<String>,
     seed_entity: Entity,
     esm: &EsmAsset,
     grid_x: i32,
@@ -340,26 +379,156 @@ fn spawn_terrain(
         .decode_heights()?
         .into_iter()
         .fold(f32::INFINITY, f32::min);
-    // All cells share one matte white material; the LAND vertex colors carry the tint.
-    let material = terrain_material
-        .get_or_insert_with(|| {
-            materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                perceptual_roughness: 1.0,
-                ..Default::default()
-            })
-        })
-        .clone();
-    commands.spawn((
+
+    let mut terrain = commands.spawn((
         Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(material),
         convert::land_transform(grid_x, grid_y),
         Visibility::default(),
         Name::new(format!("Terrain {grid_x},{grid_y}")),
         CellTerrain,
         ChildOf(seed_entity),
     ));
+    let splat = splat_materials.and_then(|splats| {
+        let material = splat_material(land, esm, asset_server, vfs, images, missing_layer, warned)?;
+        Some(splats.add(material))
+    });
+    match splat {
+        Some(material) => {
+            terrain.insert(MeshMaterial3d(material));
+        }
+        None => {
+            // All cells share one matte white material; the LAND vertex colors carry
+            // the tint.
+            let material = terrain_material
+                .get_or_insert_with(|| {
+                    materials.add(StandardMaterial {
+                        base_color: Color::WHITE,
+                        perceptual_roughness: 1.0,
+                        ..Default::default()
+                    })
+                })
+                .clone();
+            terrain.insert(MeshMaterial3d(material));
+        }
+    }
     Some(min)
+}
+
+/// Build a cell's [`TerrainSplatMaterial`] from its `VTEX` grid: distinct texture values
+/// become binding-array layers in first-appearance order, and every texel gets its
+/// layer slot. `None` when the `LAND` has no (valid) `VTEX` grid.
+///
+/// Value 0 means the engine's default land texture; any other value refers to the
+/// `LTEX` record with index value − 1. Textures that don't resolve — missing `LTEX`,
+/// file not in the VFS — warn once and bind a white stand-in, so one bad reference
+/// can't hold up the whole cell. Cells with more than [`MAX_TERRAIN_LAYERS`] distinct
+/// textures (never in vanilla data) remap the overflow to layer 0.
+fn splat_material(
+    land: &Land,
+    esm: &EsmAsset,
+    asset_server: &AssetServer,
+    vfs: &TesVfsHandle,
+    images: &mut Assets<Image>,
+    missing_layer: &mut Option<Handle<Image>>,
+    warned: &mut HashSet<String>,
+) -> Option<TerrainSplatMaterial> {
+    let grid = land.decode_textures()?;
+    let mut slots: HashMap<u16, u32> = HashMap::new();
+    let mut layers: Vec<Handle<Image>> = Vec::new();
+    let mut indices = [0u32; VTEX_GRID * VTEX_GRID];
+    for (texel, &value) in grid.iter().enumerate() {
+        let slot = match slots.get(&value) {
+            Some(&slot) => slot,
+            None => {
+                let slot = if layers.len() < MAX_TERRAIN_LAYERS {
+                    layers.push(layer_texture(
+                        value,
+                        esm,
+                        asset_server,
+                        vfs,
+                        images,
+                        missing_layer,
+                        warned,
+                    ));
+                    (layers.len() - 1) as u32
+                } else {
+                    warn_once(
+                        warned,
+                        format!(
+                            "cell {},{} uses more than {MAX_TERRAIN_LAYERS} land textures",
+                            land.grid_x, land.grid_y
+                        ),
+                    );
+                    0
+                };
+                slots.insert(value, slot);
+                slot
+            }
+        };
+        indices[texel] = slot;
+    }
+    Some(TerrainSplatMaterial { layers, indices })
+}
+
+/// Start the image load for one `VTEX` value, resolving it through `LTEX` and the VFS.
+/// Load settings mirror the NIF loader's texture loads (sRGB, repeat) so a texture
+/// shared between terrain and models isn't requested with conflicting settings.
+fn layer_texture(
+    value: u16,
+    esm: &EsmAsset,
+    asset_server: &AssetServer,
+    vfs: &TesVfsHandle,
+    images: &mut Assets<Image>,
+    missing_layer: &mut Option<Handle<Image>>,
+    warned: &mut HashSet<String>,
+) -> Handle<Image> {
+    let name = if value == 0 {
+        // No explicit texture: the engine's hardcoded default.
+        Cow::Borrowed("_land_default.tga")
+    } else {
+        match esm.index.ltex(&esm.plugin, value as u32 - 1) {
+            Some(ltex) => ltex.texture.decode(),
+            None => {
+                warn_once(warned, format!("no LTEX record with index {}", value - 1));
+                return white_stand_in(images, missing_layer);
+            }
+        }
+    };
+    match vfs.0.resolve_texture(&name) {
+        Some(path) => asset_server
+            .load_builder()
+            .with_settings(|s: &mut ImageLoaderSettings| {
+                s.is_srgb = true;
+                let mut sampler = ImageSamplerDescriptor::default();
+                sampler.set_address_mode(ImageAddressMode::Repeat);
+                s.sampler = ImageSampler::Descriptor(sampler);
+            })
+            .load(format!("tes://{path}")),
+        None => {
+            warn_once(
+                warned,
+                format!("land texture {name:?} not found in the VFS"),
+            );
+            white_stand_in(images, missing_layer)
+        }
+    }
+}
+
+/// The shared 1×1 white stand-in bound in place of unresolvable land textures
+/// ([`Image::default`] is a 1×1 all-white texture).
+fn white_stand_in(
+    images: &mut Assets<Image>,
+    missing_layer: &mut Option<Handle<Image>>,
+) -> Handle<Image> {
+    missing_layer
+        .get_or_insert_with(|| images.add(Image::default()))
+        .clone()
+}
+
+fn warn_once(warned: &mut HashSet<String>, message: String) {
+    if warned.insert(message.clone()) {
+        eprintln!("bevy-beth: {message}");
+    }
 }
 
 /// Spawn the stand-in water plane for a cell:

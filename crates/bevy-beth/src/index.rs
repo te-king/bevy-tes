@@ -14,6 +14,7 @@ use tes3_esm::records::cell::Cell;
 use tes3_esm::records::cell::CellFlags;
 use tes3_esm::records::land::Land;
 use tes3_esm::records::ligh::LightData;
+use tes3_esm::records::ltex::Ltex;
 use tes3_esm::{L1Str, Plugin, Record};
 
 /// Identifies a cell within a plugin.
@@ -89,6 +90,9 @@ pub struct EsmIndex {
     exteriors: HashMap<(i32, i32), usize>,
     /// Exterior grid → index of the cell's `LAND` record.
     lands: HashMap<(i32, i32), usize>,
+    /// `LTEX` texture index (`INTV`) → index of the `LTEX` record. What a LAND `VTEX`
+    /// value − 1 refers to.
+    ltexs: HashMap<u32, usize>,
 }
 
 impl EsmIndex {
@@ -148,6 +152,9 @@ impl EsmIndex {
                 Record::Land(land) => {
                     index.lands.insert((land.grid_x, land.grid_y), i);
                 }
+                Record::Ltex(ltex) => {
+                    index.ltexs.insert(ltex.index, i);
+                }
                 _ => {}
             }
         }
@@ -175,6 +182,15 @@ impl EsmIndex {
     pub fn land<'p>(&self, plugin: &'p Plugin, x: i32, y: i32) -> Option<&'p Land> {
         match plugin.records.get(*self.lands.get(&(x, y))?) {
             Some(Record::Land(land)) => Some(land),
+            _ => None,
+        }
+    }
+
+    /// Look up a landscape texture by its `LTEX` index (what a LAND `VTEX` value − 1
+    /// refers to).
+    pub fn ltex<'p>(&self, plugin: &'p Plugin, index: u32) -> Option<&'p Ltex> {
+        match plugin.records.get(*self.ltexs.get(&index)?) {
+            Some(Record::Ltex(ltex)) => Some(ltex),
             _ => None,
         }
     }
@@ -261,6 +277,11 @@ mod tests {
                     grid_y: 12,
                     ..Default::default()
                 }),
+                Record::Ltex(Ltex {
+                    id: l1("Sand"),
+                    index: 2,
+                    texture: l1("Tx_Sand_01.tga"),
+                }),
             ],
         }
     }
@@ -311,5 +332,15 @@ mod tests {
         let land = index.land(&plugin, -3, 12).expect("land by grid");
         assert_eq!((land.grid_x, land.grid_y), (-3, 12));
         assert!(index.land(&plugin, 99, 99).is_none());
+    }
+
+    #[test]
+    fn ltexs_resolve_by_texture_index() {
+        let plugin = synthetic_plugin();
+        let index = EsmIndex::build(&plugin);
+
+        let ltex = index.ltex(&plugin, 2).expect("ltex by INTV index");
+        assert_eq!(ltex.texture.decode(), "Tx_Sand_01.tga");
+        assert!(index.ltex(&plugin, 99).is_none());
     }
 }

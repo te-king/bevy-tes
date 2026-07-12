@@ -42,6 +42,9 @@ pub fn app_with_assets() -> App {
         app.init_asset::<Image>()
             .init_asset::<bevy::mesh::Mesh>()
             .init_asset::<bevy::pbr::StandardMaterial>()
+            // The splat asset's presence is what opts cell spawning into terrain
+            // splatting (a render app would get it from TerrainPlugin).
+            .init_asset::<bevy_beth::TerrainSplatMaterial>()
             .init_asset::<bevy::world_serialization::WorldAsset>()
             .register_asset_loader(ImageLoader::new(CompressedImageFormats::BC));
     }

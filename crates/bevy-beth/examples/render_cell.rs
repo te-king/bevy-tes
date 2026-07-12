@@ -14,8 +14,9 @@
 //!
 //! Cell resolution, reference placement, light spawning and NIF/texture loading all
 //! happen inside `bevy_beth`; this example stages a camera and lighting around the
-//! spawned entities. Exterior cells include their LAND terrain (vertex-colored, not yet
-//! texture-splatted) and a sea-level water plane where the ground dips below zero.
+//! spawned entities. Exterior cells include their LAND terrain — texture-splatted from
+//! the VTEX grid via `TerrainPlugin`, tinted by the vertex colors — and a sea-level
+//! water plane where the ground dips below zero.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -26,7 +27,9 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_dis
 use bevy::window::{ExitCondition, WindowResolution};
 use clap::Parser;
 
-use bevy_beth::{BethPlugin, CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned};
+use bevy_beth::{
+    BethPlugin, CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned, TerrainPlugin,
+};
 
 #[path = "helpers/fly_cam.rs"]
 mod fly_cam;
@@ -110,6 +113,8 @@ fn main() -> ExitCode {
             }),
             ..default()
         }))
+        // TerrainPlugin goes after DefaultPlugins (it registers a render material).
+        .add_plugins(TerrainPlugin)
         .add_systems(Update, free_cam);
     } else {
         // Screenshot mode: a hidden window is enough to drive the render target; we
@@ -130,6 +135,8 @@ fn main() -> ExitCode {
             close_when_requested: false,
             ..default()
         }))
+        // TerrainPlugin goes after DefaultPlugins (it registers a render material).
+        .add_plugins(TerrainPlugin)
         .insert_resource(Capture { path })
         .init_resource::<CaptureDone>()
         .add_systems(Update, capture);
