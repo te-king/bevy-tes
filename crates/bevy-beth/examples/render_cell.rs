@@ -9,8 +9,8 @@
 //! By default this waits until the cell's models have streamed in, frames the scene,
 //! saves one PNG and exits — printing the screenshot's absolute path. Pass `-o out.png`
 //! to choose where it lands, `--esm <file>` / `--data <dir>` for non-default data, or
-//! `--interactive` for a live window with a fly camera (hold RMB to look, WASD to fly,
-//! Space/Q up/down, Shift boost, scroll for speed).
+//! `--interactive` for a live window with Bevy's free camera (hold RMB to look, WASD to
+//! fly, E/Q up/down, Shift to run, scroll for speed).
 //!
 //! Cell resolution, reference placement, light spawning and NIF/texture loading all
 //! happen inside `bevy_beth`; this example stages a camera and lighting around the
@@ -21,6 +21,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
@@ -30,10 +31,6 @@ use clap::Parser;
 use bevy_beth::{
     BethPlugin, CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned, TerrainPlugin,
 };
-
-#[path = "helpers/fly_cam.rs"]
-mod fly_cam;
-use fly_cam::{FreeCam, free_cam};
 
 /// Render a TES3 cell with Bevy.
 #[derive(Parser, Debug)]
@@ -114,8 +111,7 @@ fn main() -> ExitCode {
             ..default()
         }))
         // TerrainPlugin goes after DefaultPlugins (it registers a render material).
-        .add_plugins(TerrainPlugin)
-        .add_systems(Update, free_cam);
+        .add_plugins((TerrainPlugin, FreeCameraPlugin));
     } else {
         // Screenshot mode: a hidden window is enough to drive the render target; we
         // capture one frame and exit. `close_when_requested` is off so nothing races our
@@ -274,15 +270,14 @@ fn frame_cell(
         ambient,
     ));
     if capture.is_none() {
-        let (yaw, pitch, _) = camera_transform.rotation.to_euler(EulerRot::YXZ);
-        camera.insert(FreeCam {
-            yaw,
-            pitch,
-            speed: 500.0,
+        // Bevy's free camera; the controller logs its controls on the first frame. The
+        // metric default speeds are far too slow for game units (~70/m), so scale them
+        // to cross a town block in a few seconds.
+        camera.insert(FreeCamera {
+            walk_speed: 500.0,
+            run_speed: 2_000.0,
+            ..default()
         });
-        println!(
-            "Controls: hold RMB to look, WASD to fly, Space/Q up/down, Shift boost, scroll for speed"
-        );
     }
 
     if !environment.interior {
