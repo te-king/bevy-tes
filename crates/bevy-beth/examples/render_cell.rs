@@ -21,10 +21,16 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
+use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera_controller::free_camera::{FreeCamera, FreeCameraPlugin};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::atmosphere::ScatteringMedium;
-use bevy::light::{Atmosphere, CascadeShadowConfigBuilder};
-use bevy::pbr::AtmosphereSettings;
+use bevy::light::{
+    Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, ShadowFilteringMethod,
+};
+use bevy::pbr::{AtmosphereSettings, ScreenSpaceAmbientOcclusion};
+use bevy::post_process::auto_exposure::{AutoExposure, AutoExposurePlugin};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_disk};
@@ -113,8 +119,9 @@ fn main() -> ExitCode {
             }),
             ..default()
         }))
-        // TerrainPlugin goes after DefaultPlugins (it registers a render material).
-        .add_plugins((TerrainPlugin, FreeCameraPlugin));
+        // TerrainPlugin goes after DefaultPlugins (it registers a render material);
+        // AutoExposurePlugin isn't part of DefaultPlugins.
+        .add_plugins((TerrainPlugin, FreeCameraPlugin, AutoExposurePlugin));
     } else {
         // Screenshot mode: a hidden window is enough to drive the render target; we
         // capture one frame and exit. `close_when_requested` is off so nothing races our
@@ -134,8 +141,9 @@ fn main() -> ExitCode {
             close_when_requested: false,
             ..default()
         }))
-        // TerrainPlugin goes after DefaultPlugins (it registers a render material).
-        .add_plugins(TerrainPlugin)
+        // TerrainPlugin goes after DefaultPlugins (it registers a render material);
+        // AutoExposurePlugin isn't part of DefaultPlugins.
+        .add_plugins((TerrainPlugin, AutoExposurePlugin))
         .insert_resource(Capture { path })
         .init_resource::<CaptureDone>()
         .add_systems(Update, capture);
@@ -229,7 +237,8 @@ fn frame_cell(
     let r = ((max - min).length() * 0.5).max(100.0);
 
     // Stage per cell kind: interiors are lit by their authored ambient plus the placed
-    // lights; exteriors get daylight and a shadow-casting sun.
+    // lights; exteriors get daylight and a shadow-casting sun, with their ambient
+    // supplied by the sky's environment map (below) instead of a flat term.
     let ambient = if environment.interior {
         // The authored AMBI colour is dark in linear space (the game adds it in gamma
         // space), so the scalar is large: it reproduces the game's ~15% brightness floor
@@ -240,8 +249,10 @@ fn frame_cell(
             ..default()
         }
     } else {
+        // Zero, not absent: an absent component would fall back to Bevy's global
+        // default ambient on top of the sky light.
         AmbientLight {
-            brightness: 300.0,
+            brightness: 0.0,
             ..default()
         }
     };
@@ -293,6 +304,31 @@ fn frame_cell(
         // Renders the sky (and implies an HDR camera); bloom gives the sun a disk.
         AtmosphereSettings::default(),
         Bloom::NATURAL,
+        // Sky-driven image-based lighting: ambient diffuse comes from the atmosphere's
+        // generated environment map (blue from above, responding to sun angle).
+        AtmosphereEnvironmentMapLight::default(),
+        // Contact shadows in clutter and under eaves. Requires (and auto-adds) the
+        // depth/normal prepasses; both SSAO and TAA require MSAA off.
+        ScreenSpaceAmbientOcclusion::default(),
+        // Alpha-masked vegetation shimmers under MSAA (it can't help alpha-tested
+        // edges); TAA resolves those. Converges over a few frames — screenshot mode
+        // waits for it. CAS recovers the crispness TAA softens away.
+        TemporalAntiAliasing::default(),
+        Msaa::Off,
+        ContrastAdaptiveSharpening::default(),
+        // Softer sun-shadow edges, using the TAA-aware filter.
+        ShadowFilteringMethod::Temporal,
+        // Punchier filmic tonemapper than the default TonyMcMapface.
+        Tonemapping::AcesFitted,
+        // Eye adaptation: meters the frame and drifts exposure toward mid-grey, so the
+        // shared interior/exterior staging each land at a sane brightness. Adapts over
+        // ~a second — screenshot mode waits for it too. Metering only the brighter
+        // half of the histogram keeps the moody, darker-than-mid-grey look from being
+        // "corrected" into overexposure.
+        AutoExposure {
+            filter: 0.50..=0.95,
+            ..default()
+        },
     ));
     if capture.is_none() {
         // Bevy's free camera; the controller logs its controls on the first frame. The
@@ -328,9 +364,9 @@ fn frame_cell(
     framed.0 = true;
 }
 
-/// Screenshot-mode driver: once the cell is framed, let a few frames render so texture
-/// uploads land, request one screenshot, then exit once its observer reports the PNG has
-/// been written.
+/// Screenshot-mode driver: once the cell is framed, let the frame settle — texture
+/// uploads, TAA convergence, auto-exposure adaptation (the slowest, ~a second) — then
+/// request one screenshot and exit once its observer reports the PNG has been written.
 fn capture(
     mut commands: Commands,
     capture: Res<Capture>,
@@ -345,7 +381,7 @@ fn capture(
     }
     *frames_since_framed += 1;
 
-    if *frames_since_framed == 8 && !*shot_requested {
+    if *frames_since_framed == 90 && !*shot_requested {
         *shot_requested = true;
         commands
             .spawn(Screenshot::primary_window())
