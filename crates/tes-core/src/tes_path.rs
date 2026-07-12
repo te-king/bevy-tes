@@ -5,14 +5,16 @@
 //! `\` separators. Every index or comparison therefore goes through one **normal form**:
 //! lowercase, backslash-separated (the form BSA directories store natively).
 //!
-//! [`normalize`] produces that form as an owned `String`; [`TesPath`] is a zero-copy
-//! view type that compares and hashes *as if* normalized, without allocating.
+//! [`normalize`] produces that form as an owned `String`; [`TesPath`]/[`TesPathBuf`] are
+//! the borrowed/owned view pair (mirroring [`Path`](std::path::Path)/[`PathBuf`](std::path::PathBuf)
+//! and [`L1Str`]/[`L1String`]) that compare and hash *as if* normalized, without allocating.
 
+use std::borrow::Borrow;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-use crate::L1Str;
+use crate::{L1Str, L1String};
 
 /// Normalize a game-data path for lookup or comparison: ASCII-lowercase, `/` → `\`.
 ///
@@ -101,6 +103,85 @@ impl fmt::Display for TesPath {
     }
 }
 
+impl ToOwned for TesPath {
+    type Owned = TesPathBuf;
+    fn to_owned(&self) -> TesPathBuf {
+        TesPathBuf(self.0.to_l1string())
+    }
+}
+
+/// An owned game-data path: the [`TesPath`] counterpart that owns its bytes, mirroring
+/// [`L1String`]/[`L1Str`] and [`PathBuf`](std::path::PathBuf)/[`Path`](std::path::Path).
+///
+/// Reach for it as a map key when the path can't borrow from longer-lived storage — e.g.
+/// a loose-file index built by walking the filesystem, as opposed to BSA names that
+/// borrow straight from the archive mapping. It derefs (and [`Borrow`]s) to [`TesPath`],
+/// so a `HashMap<TesPathBuf, _>` can be probed with a borrowed `&TesPath` and both agree
+/// on the normalized equality/hash.
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct TesPathBuf(L1String);
+
+impl TesPathBuf {
+    /// Take ownership of raw Windows-1252 path bytes.
+    pub fn from_bytes(bytes: Vec<u8>) -> TesPathBuf {
+        TesPathBuf(L1String::from_bytes(bytes))
+    }
+
+    /// Borrow as a [`TesPath`].
+    pub fn as_tes_path(&self) -> &TesPath {
+        TesPath::new(&self.0)
+    }
+}
+
+impl Deref for TesPathBuf {
+    type Target = TesPath;
+    fn deref(&self) -> &TesPath {
+        self.as_tes_path()
+    }
+}
+
+impl Borrow<TesPath> for TesPathBuf {
+    fn borrow(&self) -> &TesPath {
+        self.as_tes_path()
+    }
+}
+
+impl From<&TesPath> for TesPathBuf {
+    fn from(path: &TesPath) -> TesPathBuf {
+        path.to_owned()
+    }
+}
+
+// Equality and hashing delegate to `TesPath` so they normalize, and — crucially — so a
+// `TesPathBuf` key and a borrowed `&TesPath` probe agree, as `Borrow` requires.
+impl PartialEq for TesPathBuf {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_tes_path() == other.as_tes_path()
+    }
+}
+
+impl Eq for TesPathBuf {}
+
+impl Hash for TesPathBuf {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_tes_path().hash(state);
+    }
+}
+
+impl fmt::Debug for TesPathBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_tes_path(), f)
+    }
+}
+
+/// Displays the original (un-normalized) path text.
+impl fmt::Display for TesPathBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.as_tes_path(), f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +221,26 @@ mod tests {
         let p = TesPath::from_bytes(br"MESHES\Probe.NIF");
         // Deref reaches the un-normalized name.
         assert_eq!(p.as_bytes(), br"MESHES\Probe.NIF");
+    }
+
+    #[test]
+    fn owned_matches_borrowed_for_eq_and_hash() {
+        let owned = TesPath::from_bytes(br"MESHES\I\Shack.NIF").to_owned();
+        let borrowed = TesPath::from_bytes(b"meshes/i/shack.nif");
+        // The `Borrow<TesPath>` contract: owned key and borrowed probe must agree.
+        assert_eq!(owned.as_tes_path(), borrowed);
+        assert_eq!(hash_of(owned.as_tes_path()), hash_of(borrowed));
+    }
+
+    #[test]
+    fn owned_key_probed_by_borrowed_path() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(TesPath::from_bytes(br"Textures\TX_Wood.DDS").to_owned(), 7);
+        // Look the owned key up through a differently-cased borrowed `&TesPath`.
+        assert_eq!(
+            map.get(TesPath::from_bytes(b"textures/tx_wood.dds")),
+            Some(&7)
+        );
+        assert_eq!(map.get(TesPath::from_bytes(b"textures/other.dds")), None);
     }
 }

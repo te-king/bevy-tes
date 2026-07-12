@@ -66,8 +66,8 @@ impl<'a> BsaDirectory<'a> {
     /// Parse a TES3 BSA directory out of the full archive mapping. Returns the file table
     /// as name → data-slice pairs borrowed from `mmap`; `version` is read but not
     /// validated here.
-    fn parse_bsa(mmap: &'a [u8]) -> IResult<&'a [u8], BsaDirectory<'a>> {
-        let (input, version) = le_u32(mmap)?;
+    fn parse_bsa(input: &'a [u8]) -> IResult<&'a [u8], BsaDirectory<'a>> {
+        let (input, version) = le_u32(input)?;
         let (input, hash_offset) = le_u32(input)?;
         let (input, count) = le_u32(input)?;
 

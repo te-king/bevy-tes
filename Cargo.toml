@@ -20,6 +20,7 @@ tes-testdata = { path = "crates/tes-testdata" }
 bitflags = "2"
 nom = "8"
 thiserror = "2"
+self_cell = "1.2.2"
 bevy = { version = "0.19", default-features = false, features = ["bevy_asset"] }
 clap = { version = "4", features = ["derive"] }
 

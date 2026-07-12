@@ -2,69 +2,103 @@
 //!
 //! Morrowind resolves a data path (`meshes\i\in_de_shack_01.nif`) by checking loose files
 //! in the `Data Files` directory first, then the registered BSA archives. [`TesVfs`]
-//! reproduces that: one eager, case-insensitive index over the loose file tree, layered
-//! over any number of open (mmap-backed) [`Bsa`] archives, where **loose files win over
-//! archives** and **later archives win over earlier ones** (the game's load-order rule —
-//! `Bloodmoon.bsa` overrides `Morrowind.bsa`).
+//! reproduces that with **one** case-insensitive index over both: loose files and every
+//! archive entry share a single [`HashMap`] keyed on [`TesPath`], where **loose files win
+//! over archives** and **later archives win over earlier ones** (the game's load-order
+//! rule — `Bloodmoon.bsa` overrides `Morrowind.bsa`).
 //!
-//! Path lookups are case-insensitive and separator-agnostic on every platform: both
-//! `TEXTURES\TX_WOOD.DDS` and `textures/tx_wood.dds` resolve to the same entry, matching
-//! how the game (built for a case-insensitive file system) treats paths.
+//! The map is built once at construction. Archive entries key on a [`TesPath`] borrowed
+//! straight from the (mmap-backed) archive and point at a zero-copy slice of it; loose
+//! entries key on an owned [`TesPathBuf`] and point at the on-disk path, read on demand.
+//! Because [`TesPath`] compares and hashes in the game's path normal form, lookups are
+//! case-insensitive and `/`-vs-`\` agnostic on every platform.
 //!
 //! [`TesVfsReader`] adapts the VFS to Bevy's [`AssetReader`] so the whole layered view is
-//! served as a single asset source.
+//! served as a single asset source — archive files as borrowed [`SliceReader`]s (no
+//! copy), loose files as freshly-read [`VecReader`]s.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, VecReader};
-use tes_core::paths::normalize;
+use bevy::asset::io::{
+    AssetReader, AssetReaderError, PathStream, Reader, ReaderNotSeekableError, STACK_FUTURE_SIZE,
+    SeekableReader, SliceReader, StackFuture, VecReader,
+};
+use bevy::tasks::futures_lite::io::AsyncRead;
+use self_cell::self_cell;
+use tes_core::tes_path::normalize;
+use tes_core::{TesPath, TesPathBuf};
 use tes3_bsa::Bsa;
 
-/// A layered, case-insensitive view over a Morrowind `Data Files` directory: loose files
-/// over BSA archives. See the [module docs](self) for the precedence rules.
+/// A layered, case-insensitive view over a Morrowind `Data Files` directory and its BSA
+/// archives. See the [module docs](self) for the precedence rules.
 pub struct TesVfs {
-    /// Normalized path → actual on-disk path, built by one walk of the root at
-    /// construction. Makes lookups case-correct on case-sensitive file systems and
-    /// existence checks I/O-free.
-    loose: HashMap<String, PathBuf>,
-    /// Open archives in load order; later archives take precedence.
-    archives: Vec<Bsa>,
+    internal: TesVfsInternal,
+}
+
+self_cell!(
+    struct TesVfsInternal {
+        owner: Box<[Bsa]>,
+
+        #[covariant]
+        dependent: TesVfsDirectory,
+    }
+);
+
+struct TesVfsDirectory<'a> {
+    /// The unified index. Keys are [`TesPath`]s — borrowed from an archive mapping for
+    /// archived entries, owned for loose ones — so lookups normalize (case-fold, `/`→`\`)
+    /// on the fly.
+    table: HashMap<Cow<'a, TesPath>, Source<'a>>,
+}
+
+/// Where a resolved path's bytes come from.
+enum Source<'a> {
+    /// A zero-copy slice into a BSA archive mapping.
+    Archived(&'a [u8]),
+    /// A loose file on disk, read on demand.
+    Loose(PathBuf),
 }
 
 impl TesVfs {
     /// Open a VFS over `root` with an explicit archive load order (paths resolved
-    /// relative to the process, not `root`; later archives override earlier ones).
-    /// Fails only if `root` can't be walked; an unreadable archive is an error too,
-    /// since an explicit list is a statement of intent.
+    /// relative to the process, not `root`; later archives override earlier ones, and
+    /// loose files under `root` override them all). Fails if `root` can't be walked or an
+    /// archive can't be opened — an explicit list is a statement of intent.
     pub fn new(
         root: impl AsRef<Path>,
         archives: impl IntoIterator<Item = impl AsRef<Path>>,
     ) -> io::Result<TesVfs> {
-        let loose = index_loose_files(root.as_ref())?;
+        let root = root.as_ref().to_path_buf();
         let archives = archives
             .into_iter()
             .map(|p| Bsa::open(p.as_ref()).map_err(io::Error::other))
-            .collect::<io::Result<Vec<_>>>()?;
-        Ok(TesVfs { loose, archives })
+            .collect::<io::Result<Vec<_>>>()?
+            .into_boxed_slice();
+        let internal =
+            TesVfsInternal::try_new(archives, |archives| build_directory(archives, &root))?;
+        Ok(TesVfs { internal })
     }
 
-    /// Open a VFS over `root`, discovering `*.bsa` archives at its top level and
-    /// ordering them by modification time, oldest first — which reproduces the vanilla
-    /// game's effective order (`Morrowind.bsa` < `Tribunal.bsa` < `Bloodmoon.bsa`). For
-    /// modded setups with different conventions, use [`TesVfs::new`] with an explicit
-    /// order instead. Archives that fail to open are skipped with a warning on stderr.
+    /// Open a VFS over `root`, discovering `*.bsa` archives at its top level and ordering
+    /// them by modification time, oldest first — which reproduces the vanilla game's
+    /// effective order (`Morrowind.bsa` < `Tribunal.bsa` < `Bloodmoon.bsa`). For modded
+    /// setups with different conventions, use [`TesVfs::new`] with an explicit order.
+    /// Archives that fail to open are skipped with a warning on stderr.
     pub fn open(root: impl AsRef<Path>) -> io::Result<TesVfs> {
-        let root = root.as_ref();
-        let mut bsas: Vec<PathBuf> = std::fs::read_dir(root)?
+        let root = root.as_ref().to_path_buf();
+        let mut bsas: Vec<PathBuf> = std::fs::read_dir(&root)?
             .filter_map(|e| Some(e.ok()?.path()))
             .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("bsa")))
             .collect();
         bsas.sort_by_key(|p| p.metadata().and_then(|m| m.modified()).ok());
 
-        let loose = index_loose_files(root)?;
         let archives = bsas
             .iter()
             .filter_map(|p| match Bsa::open(p) {
@@ -77,37 +111,42 @@ impl TesVfs {
                     None
                 }
             })
-            .collect();
-        Ok(TesVfs { loose, archives })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        let internal =
+            TesVfsInternal::try_new(archives, |archives| build_directory(archives, &root))?;
+        Ok(TesVfs { internal })
     }
 
     /// An empty VFS: every lookup misses. Used to keep an app bootable when the data
     /// directory is absent.
     pub fn empty() -> TesVfs {
-        TesVfs {
-            loose: HashMap::new(),
-            archives: Vec::new(),
-        }
+        let internal = TesVfsInternal::new(Box::new([]), |_| TesVfsDirectory {
+            table: HashMap::new(),
+        });
+        TesVfs { internal }
     }
 
     /// Whether `path` (any case, `/` or `\` separators) resolves to a file. I/O-free.
     pub fn contains(&self, path: &str) -> bool {
-        let key = normalize(path);
-        self.loose.contains_key(&key) || self.archives.iter().any(|a| a.get(&key).is_some())
+        self.internal
+            .borrow_dependent()
+            .table
+            .contains_key(TesPath::from_bytes(path.as_bytes()))
     }
 
-    /// Read a file's bytes: the loose file if present, else the *last* archive that
-    /// contains the path. `None` when nowhere.
+    /// Read a file's bytes: a copy of the archive slice, or the loose file read from disk.
+    /// `None` when the path isn't in the VFS (or a loose file can't be read).
     pub fn read(&self, path: &str) -> Option<Vec<u8>> {
-        let key = normalize(path);
-        if let Some(on_disk) = self.loose.get(&key) {
-            return std::fs::read(on_disk).ok();
+        match self
+            .internal
+            .borrow_dependent()
+            .table
+            .get(TesPath::from_bytes(path.as_bytes()))?
+        {
+            Source::Archived(bytes) => Some(bytes.to_vec()),
+            Source::Loose(on_disk) => std::fs::read(on_disk).ok(),
         }
-        self.archives
-            .iter()
-            .rev()
-            .find_map(|a| a.get(&key))
-            .map(<[u8]>::to_vec)
     }
 
     /// Resolve a NIF texture reference to the VFS path (forward-slash form) that actually
@@ -150,10 +189,25 @@ impl TesVfs {
     }
 }
 
-/// Walk `root` recursively, mapping each file's normalized relative path to its on-disk
-/// path.
-fn index_loose_files(root: &Path) -> io::Result<HashMap<String, PathBuf>> {
-    let mut index = HashMap::new();
+/// Build the unified directory: archive entries first (in load order, so later archives
+/// overwrite earlier ones), then loose files (so they win over every archive).
+fn build_directory<'a>(archives: &'a [Bsa], root: &Path) -> io::Result<TesVfsDirectory<'a>> {
+    let mut table: HashMap<Cow<'a, TesPath>, Source<'a>> = HashMap::new();
+    for bsa in archives {
+        for (name, data) in bsa.files() {
+            table.insert(Cow::Borrowed(name), Source::Archived(data));
+        }
+    }
+    index_loose_files(root, &mut table)?;
+    Ok(TesVfsDirectory { table })
+}
+
+/// Walk `root` recursively, inserting each loose file under its normalized relative path,
+/// overwriting any archive entry at the same path.
+fn index_loose_files<'a>(
+    root: &Path,
+    table: &mut HashMap<Cow<'a, TesPath>, Source<'a>>,
+) -> io::Result<()> {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir)? {
@@ -162,20 +216,68 @@ fn index_loose_files(root: &Path) -> io::Result<HashMap<String, PathBuf>> {
             if entry.file_type()?.is_dir() {
                 stack.push(path);
             } else if let Ok(rel) = path.strip_prefix(root) {
-                index.insert(normalize(&rel.to_string_lossy()), path);
+                let key = TesPathBuf::from_bytes(rel.as_os_str().as_bytes().to_vec());
+                table.insert(Cow::Owned(key), Source::Loose(path));
             }
         }
     }
-    Ok(index)
+    Ok(())
 }
 
 /// [`AssetReader`] serving the `tes://` source from a shared [`TesVfs`].
 pub struct TesVfsReader(pub Arc<TesVfs>);
 
+/// The reader returned by [`TesVfsReader::read`]: a borrowed slice for archive files, or
+/// freshly-read bytes for loose files. A hand-written sum type because both arms must
+/// resolve to one concrete `impl Reader` and the two inner readers differ.
+enum VfsReader<'a> {
+    Archived(SliceReader<'a>),
+    Loose(VecReader),
+}
+
+impl AsyncRead for VfsReader<'_> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        // Both inner readers are `Unpin`, so re-pinning by reference is sound.
+        match self.get_mut() {
+            VfsReader::Archived(r) => Pin::new(r).poll_read(cx, buf),
+            VfsReader::Loose(r) => Pin::new(r).poll_read(cx, buf),
+        }
+    }
+}
+
+impl Reader for VfsReader<'_> {
+    fn read_to_end<'a>(
+        &'a mut self,
+        buf: &'a mut Vec<u8>,
+    ) -> StackFuture<'a, io::Result<usize>, STACK_FUTURE_SIZE> {
+        // Delegate so each inner reader keeps its own bulk-read fast path.
+        match self {
+            VfsReader::Archived(r) => r.read_to_end(buf),
+            VfsReader::Loose(r) => r.read_to_end(buf),
+        }
+    }
+
+    fn seekable(&mut self) -> Result<&mut dyn SeekableReader, ReaderNotSeekableError> {
+        match self {
+            VfsReader::Archived(r) => r.seekable(),
+            VfsReader::Loose(r) => r.seekable(),
+        }
+    }
+}
+
 impl AssetReader for TesVfsReader {
     async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
-        match self.0.read(&path.to_string_lossy()) {
-            Some(bytes) => Ok(VecReader::new(bytes)),
+        let key = TesPath::from_bytes(path.as_os_str().as_bytes());
+        match self.0.internal.borrow_dependent().table.get(key) {
+            Some(Source::Archived(bytes)) => Ok(VfsReader::Archived(SliceReader::new(bytes))),
+            Some(Source::Loose(on_disk)) => {
+                let bytes = std::fs::read(on_disk)?;
+                Ok(VfsReader::Loose(VecReader::new(bytes)))
+            }
             None => Err(AssetReaderError::NotFound(path.to_path_buf())),
         }
     }

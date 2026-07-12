@@ -10,8 +10,8 @@ repository.workspace = true
 tes-core = { workspace = true }
 thiserror = { workspace = true }
 nom = { workspace = true }
+self_cell = { workspace = true }
 memmap2 = "0.9"
-self_cell = "1.2.2"
 
 [dev-dependencies]
 # The `cli` example also inspects plugins, so it needs the ESM parser.
