@@ -2,13 +2,13 @@
 //!
 //! A plugin file is a flat sequence of records: a leading [`Tes3`](records::tes3::Tes3)
 //! header followed by content records. Parsing copies into owned structures: the parsed
-//! [`Plugin`] and its records own their strings ([`L1String`](crate::L1String)) and
-//! binary blobs, so the `Plugin` is `'static` and the input buffer is only borrowed for
+//! [`Esm`] and its records own their strings ([`L1String`](crate::L1String)) and
+//! binary blobs, so the `Esm` is `'static` and the input buffer is only borrowed for
 //! the duration of the parse call:
 //!
 //! ```no_run
 //! let bytes = std::fs::read("data/Morrowind.esm").unwrap();
-//! let plugin = tes3_esm::Plugin::parse(&bytes).unwrap();
+//! let esm = tes3_esm::Esm::parse(&bytes).unwrap();
 //! ```
 
 pub mod common;
@@ -82,17 +82,17 @@ records! {
 
 /// A fully parsed TES3 plugin (`.esm`/`.esp`). Owns all of its data, so it is `'static`.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Plugin {
+pub struct Esm {
     /// The leading `TES3` header record.
     pub header: Tes3,
     /// All content records following the header, in file order.
     pub records: Vec<Record>,
 }
 
-impl Plugin {
-    /// Parse a plugin from an in-memory byte slice. The returned [`Plugin`] owns its data
+impl Esm {
+    /// Parse a plugin from an in-memory byte slice. The returned [`Esm`] owns its data
     /// (copied out of `input`), so it does not borrow `input` after this returns.
-    pub fn parse(input: &[u8]) -> Result<Plugin, EsmError> {
+    pub fn parse(input: &[u8]) -> Result<Esm, EsmError> {
         let mut remaining = input;
         let mut records = Vec::new();
         let mut header: Option<Tes3> = None;
@@ -113,7 +113,7 @@ impl Plugin {
             remaining = rest;
         }
 
-        Ok(Plugin {
+        Ok(Esm {
             header: header.unwrap_or_default(),
             records,
         })

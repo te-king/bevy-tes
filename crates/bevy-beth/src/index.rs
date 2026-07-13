@@ -15,7 +15,7 @@ use tes3_esm::records::cell::CellFlags;
 use tes3_esm::records::land::Land;
 use tes3_esm::records::ligh::LightData;
 use tes3_esm::records::ltex::Ltex;
-use tes3_esm::{L1Str, Plugin, Record};
+use tes3_esm::{Esm, L1Str, Record};
 
 /// Identifies a cell within a plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -78,7 +78,7 @@ pub struct ObjectInfo {
     pub light: Option<LightData>,
 }
 
-/// Lookups over a parsed [`Plugin`]: editor id → [`ObjectInfo`], and [`CellId`] →
+/// Lookups over a parsed [`Esm`]: editor id → [`ObjectInfo`], and [`CellId`] →
 /// `CELL` record. Built once by the ESM loader; see the [module docs](self).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EsmIndex {
@@ -98,7 +98,7 @@ pub struct EsmIndex {
 impl EsmIndex {
     /// Build the index in one pass over the plugin's records. Later records win on id
     /// collision, mirroring the game's last-definition-wins rule within a file.
-    pub fn build(plugin: &Plugin) -> EsmIndex {
+    pub fn build(plugin: &Esm) -> EsmIndex {
         let mut index = EsmIndex::default();
         for (i, record) in plugin.records.iter().enumerate() {
             match record {
@@ -167,7 +167,7 @@ impl EsmIndex {
     }
 
     /// Look up a cell record by id (interior names match case-insensitively).
-    pub fn cell<'p>(&self, plugin: &'p Plugin, id: &CellId) -> Option<&'p Cell> {
+    pub fn cell<'p>(&self, plugin: &'p Esm, id: &CellId) -> Option<&'p Cell> {
         let i = match id {
             CellId::Interior(name) => *self.interiors.get(&name.to_lowercase())?,
             CellId::Exterior { x, y } => *self.exteriors.get(&(*x, *y))?,
@@ -179,7 +179,7 @@ impl EsmIndex {
     }
 
     /// Look up an exterior cell's `LAND` record by grid coordinates.
-    pub fn land<'p>(&self, plugin: &'p Plugin, x: i32, y: i32) -> Option<&'p Land> {
+    pub fn land<'p>(&self, plugin: &'p Esm, x: i32, y: i32) -> Option<&'p Land> {
         match plugin.records.get(*self.lands.get(&(x, y))?) {
             Some(Record::Land(land)) => Some(land),
             _ => None,
@@ -188,7 +188,7 @@ impl EsmIndex {
 
     /// Look up a landscape texture by its `LTEX` index (what a LAND `VTEX` value − 1
     /// refers to).
-    pub fn ltex<'p>(&self, plugin: &'p Plugin, index: u32) -> Option<&'p Ltex> {
+    pub fn ltex<'p>(&self, plugin: &'p Esm, index: u32) -> Option<&'p Ltex> {
         match plugin.records.get(*self.ltexs.get(&index)?) {
             Some(Record::Ltex(ltex)) => Some(ltex),
             _ => None,
@@ -234,8 +234,8 @@ mod tests {
         L1String::from_bytes(s.as_bytes().to_vec())
     }
 
-    fn synthetic_plugin() -> Plugin {
-        Plugin {
+    fn synthetic_plugin() -> Esm {
+        Esm {
             header: Default::default(),
             records: vec![
                 Record::Stat(Stat {

@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use tes3_bsa::Bsa;
-use tes3_esm::Plugin;
+use tes3_esm::Esm;
 use tes3_esm::records::tes3::HeaderFlags;
 
 /// Inspect Morrowind (TES3) data files.
@@ -84,7 +84,7 @@ fn run_esm(path: &Path) -> ExitCode {
         Ok(b) => b,
         Err(e) => return fail(path, &e),
     };
-    let plugin = match Plugin::parse(&bytes) {
+    let plugin = match Esm::parse(&bytes) {
         Ok(p) => p,
         Err(e) => return fail(path, &e),
     };

@@ -21,7 +21,7 @@ use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags, VTEX_GRI
 use tes3_esm::records::ligh::{Ligh, LightData};
 use tes3_esm::records::ltex::Ltex;
 use tes3_esm::records::stat::Stat;
-use tes3_esm::{L1String, Plugin, Record};
+use tes3_esm::{Esm, L1String, Record};
 
 use bevy_beth::{
     CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
@@ -48,7 +48,7 @@ fn reference(id: u32, object: &str, transform: Option<ReferenceTransform>) -> Re
 /// model doesn't exist in any VFS), a model-less light, a creature (skipped), a disabled
 /// static (skipped), an unknown id (skipped) — plus water.
 fn synthetic_asset() -> EsmAsset {
-    let plugin = Plugin {
+    let plugin = Esm {
         header: Default::default(),
         records: vec![
             Record::Stat(Stat {
@@ -204,7 +204,7 @@ fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
         logical[9 * VTEX_GRID + 5] = 2;
         vtex_bytes(&logical)
     });
-    let plugin = Plugin {
+    let plugin = Esm {
         header: Default::default(),
         records: vec![
             Record::Stat(Stat {
