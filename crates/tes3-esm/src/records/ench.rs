@@ -1,8 +1,9 @@
 //! `ENCH` — an enchantment.
 
 use crate::common::{Subrecord, enumeration, flags, l1, le_u32, parse_or_default};
-use crate::macros::{enum_field, parse_struct};
+use crate::macros::enum_field;
 use crate::shared::{Effect, effect};
+use nom::IResult;
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -31,13 +32,20 @@ pub struct EnchantData {
     pub flags: EnchantFlags,
 }
 
-parse_struct! {
-    fn enchant_data -> EnchantData {
-        kind: enumeration,
-        cost: le_u32,
-        charge: le_u32,
-        flags: flags,
-    }
+fn enchant_data(input: &[u8]) -> IResult<&[u8], EnchantData> {
+    let (input, kind) = enumeration(input)?;
+    let (input, cost) = le_u32(input)?;
+    let (input, charge) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
+    Ok((
+        input,
+        EnchantData {
+            kind,
+            cost,
+            charge,
+            flags,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

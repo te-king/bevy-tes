@@ -1,7 +1,7 @@
 //! `LIGH` — a light.
 
 use crate::common::{Color, Subrecord, color, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
-use crate::macros::parse_struct;
+use nom::IResult;
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -31,15 +31,24 @@ pub struct LightData {
     pub flags: LightFlags,
 }
 
-parse_struct! {
-    fn light_data -> LightData {
-        weight: le_f32,
-        value: le_u32,
-        time: le_i32,
-        radius: le_u32,
-        color: color,
-        flags: flags,
-    }
+fn light_data(input: &[u8]) -> IResult<&[u8], LightData> {
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, time) = le_i32(input)?;
+    let (input, radius) = le_u32(input)?;
+    let (input, color) = color(input)?;
+    let (input, flags) = flags(input)?;
+    Ok((
+        input,
+        LightData {
+            weight,
+            value,
+            time,
+            radius,
+            color,
+            flags,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

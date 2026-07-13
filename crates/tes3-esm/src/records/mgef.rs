@@ -1,7 +1,8 @@
 //! `MGEF` — a magic effect.
 
 use crate::common::{Subrecord, enumeration, finish, flags, l1, le_f32, le_u32, parse_or_default};
-use crate::macros::{enum_field, parse_struct};
+use crate::macros::enum_field;
+use nom::IResult;
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -40,18 +41,30 @@ pub struct MagicEffectData {
     pub size_cap: f32,
 }
 
-parse_struct! {
-    fn magic_effect_data -> MagicEffectData {
-        school: enumeration,
-        base_cost: le_f32,
-        flags: flags,
-        red: le_u32,
-        green: le_u32,
-        blue: le_u32,
-        speed_x: le_f32,
-        size_x: le_f32,
-        size_cap: le_f32,
-    }
+fn magic_effect_data(input: &[u8]) -> IResult<&[u8], MagicEffectData> {
+    let (input, school) = enumeration(input)?;
+    let (input, base_cost) = le_f32(input)?;
+    let (input, flags) = flags(input)?;
+    let (input, red) = le_u32(input)?;
+    let (input, green) = le_u32(input)?;
+    let (input, blue) = le_u32(input)?;
+    let (input, speed_x) = le_f32(input)?;
+    let (input, size_x) = le_f32(input)?;
+    let (input, size_cap) = le_f32(input)?;
+    Ok((
+        input,
+        MagicEffectData {
+            school,
+            base_cost,
+            flags,
+            red,
+            green,
+            blue,
+            speed_x,
+            size_x,
+            size_cap,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

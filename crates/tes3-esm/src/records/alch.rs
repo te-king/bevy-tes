@@ -1,8 +1,8 @@
 //! `ALCH` — a potion or other alchemy item.
 
 use crate::common::{Subrecord, flags, l1, le_f32, le_u32, parse_or_default};
-use crate::macros::parse_struct;
 use crate::shared::{Effect, effect};
+use nom::IResult;
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -20,12 +20,18 @@ pub struct AlchemyData {
     pub flags: AlchemyFlags,
 }
 
-parse_struct! {
-    fn alchemy_data -> AlchemyData {
-        weight: le_f32,
-        value: le_u32,
-        flags: flags,
-    }
+fn alchemy_data(input: &[u8]) -> IResult<&[u8], AlchemyData> {
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
+    Ok((
+        input,
+        AlchemyData {
+            weight,
+            value,
+            flags,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
