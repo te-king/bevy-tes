@@ -1,101 +1,97 @@
 //! TES3 (Morrowind) plugin format parsing.
 //!
 //! A plugin file is a flat sequence of records: a leading [`Tes3`](records::tes3::Tes3)
-//! header followed by content records. Parsing is zero-copy: the parsed [`Esm`] and its
-//! records borrow their strings ([`&L1Str`](crate::L1Str)) and binary blobs from the
-//! input buffer, which must therefore outlive the `Esm`:
+//! header followed by content records. Parsing is zero-copy: the parsed [`EsmDirectory`]
+//! and its records borrow their strings ([`&L1Str`](crate::L1Str)) and binary blobs from
+//! the input buffer, which must therefore outlive the directory.
+//!
+//! [`Esm`] bundles the buffer and the parsed [`EsmDirectory`] view in one owned value —
+//! a self-referential wrapper, mirroring [`tes3_bsa::Bsa`](https://docs.rs/tes3-bsa) — so
+//! a single value carries both. This is the usual entry point:
 //!
 //! ```no_run
 //! let bytes = std::fs::read("data/Morrowind.esm").unwrap();
-//! let esm = tes3_esm::Esm::parse(&bytes).unwrap();
+//! let esm = tes3_esm::Esm::parse(bytes).unwrap();
+//! println!("{} records", esm.directory().records.len());
 //! ```
 //!
-//! To bundle the buffer and the parsed view in one owned value, see `bevy_beth`'s
-//! `EsmAsset` (a self-referential wrapper over both).
+//! To parse a buffer you already own and keep borrowing yourself, call
+//! [`EsmDirectory::parse`] directly.
 
 pub mod common;
 mod macros;
 pub mod records;
 pub mod shared;
 
-use common::{RecordFlags, Subrecords, Tag, record_header};
-use macros::records;
+use common::record_header;
 use nom::bytes::complete::take;
+use self_cell::self_cell;
 
 pub use common::EsmError;
+pub use records::Record;
 pub use records::tes3::Tes3;
 pub use tes_core::{L1Str, L1String};
 
-// Bring every record struct into scope for the `Record` enum.
-use records::{
-    acti::Acti, alch::Alch, appa::Appa, armo::Armo, body::Body, book::Book, bsgn::Bsgn, cell::Cell,
-    clas::Clas, clot::Clot, cont::Cont, crea::Crea, dial::Dial, door::Door, ench::Ench, fact::Fact,
-    glob::Glob, gmst::Gmst, info::Info, ingr::Ingr, land::Land, levc::Levc, levi::Levi, ligh::Ligh,
-    lock::Lock, ltex::Ltex, mgef::Mgef, misc::Misc, npc::Npc, pgrd::Pgrd, prob::Prob, race::Race,
-    regn::Regn, repa::Repa, scpt::Scpt, skil::Skil, sndg::Sndg, soun::Soun, spel::Spel, sscr::Sscr,
-    stat::Stat, weap::Weap,
-};
+/// An owned, parsed TES3 plugin (`.esm`/`.esp`): the raw file bytes plus the zero-copy
+/// [`EsmDirectory`] view borrowing them (reach it via [`Esm::directory`]).
+///
+/// A self-referential wrapper mirroring [`tes3_bsa::Bsa`](https://docs.rs/tes3-bsa): the
+/// buffer and the records that borrow it travel together, so callers hold one value
+/// instead of juggling a buffer and a view with a lifetime. Dropping the `Esm` frees the
+/// buffer.
+pub struct Esm(EsmInternal);
 
-records! {
-    Tes3(Tes3) = b"TES3",
-    Gmst(Gmst) = b"GMST",
-    Glob(Glob) = b"GLOB",
-    Clas(Clas) = b"CLAS",
-    Fact(Fact) = b"FACT",
-    Race(Race) = b"RACE",
-    Soun(Soun) = b"SOUN",
-    Skil(Skil) = b"SKIL",
-    Mgef(Mgef) = b"MGEF",
-    Scpt(Scpt) = b"SCPT",
-    Regn(Regn) = b"REGN",
-    Bsgn(Bsgn) = b"BSGN",
-    Ltex(Ltex) = b"LTEX",
-    Stat(Stat) = b"STAT",
-    Door(Door) = b"DOOR",
-    Misc(Misc) = b"MISC",
-    Weap(Weap) = b"WEAP",
-    Cont(Cont) = b"CONT",
-    Spel(Spel) = b"SPEL",
-    Crea(Crea) = b"CREA",
-    Body(Body) = b"BODY",
-    Ligh(Ligh) = b"LIGH",
-    Ench(Ench) = b"ENCH",
-    Npc(Npc) = b"NPC_",
-    Armo(Armo) = b"ARMO",
-    Clot(Clot) = b"CLOT",
-    Repa(Repa) = b"REPA",
-    Acti(Acti) = b"ACTI",
-    Appa(Appa) = b"APPA",
-    Lock(Lock) = b"LOCK",
-    Prob(Prob) = b"PROB",
-    Ingr(Ingr) = b"INGR",
-    Book(Book) = b"BOOK",
-    Alch(Alch) = b"ALCH",
-    Levi(Levi) = b"LEVI",
-    Levc(Levc) = b"LEVC",
-    Cell(Cell) = b"CELL",
-    Land(Land) = b"LAND",
-    Pgrd(Pgrd) = b"PGRD",
-    Sndg(Sndg) = b"SNDG",
-    Dial(Dial) = b"DIAL",
-    Info(Info) = b"INFO",
-    Sscr(Sscr) = b"SSCR",
+self_cell!(
+    struct EsmInternal {
+        owner: Vec<u8>,
+
+        #[covariant]
+        dependent: EsmDirectory,
+    }
+);
+
+impl Esm {
+    /// Parse `bytes` into an owned plugin. The buffer is moved into the returned value and
+    /// the parsed records borrow it; no record data is copied out.
+    pub fn parse(bytes: Vec<u8>) -> Result<Esm, EsmError> {
+        let internal = EsmInternal::try_new(bytes, |bytes| EsmDirectory::parse(bytes))?;
+        Ok(Esm(internal))
+    }
+
+    /// Wrap an in-memory [`EsmDirectory<'static>`] (e.g. a synthetic test plugin built
+    /// from `&'static` literals) without a backing buffer.
+    pub fn from_static(directory: EsmDirectory<'static>) -> Esm {
+        Esm(EsmInternal::new(Vec::new(), |_| directory))
+    }
+
+    /// The parsed plugin directory: header plus all records in file order.
+    pub fn directory(&self) -> &EsmDirectory<'_> {
+        self.0.borrow_dependent()
+    }
 }
 
-/// A fully parsed TES3 plugin (`.esm`/`.esp`). Borrows its strings and blobs from the
-/// input buffer, which must outlive it.
+// Manual: self_cell's generated Debug would print the raw file bytes.
+impl std::fmt::Debug for Esm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Esm").field(self.directory()).finish()
+    }
+}
+
+/// A fully parsed TES3 plugin directory: the header plus every record, borrowing their
+/// strings and blobs from the input buffer, which must outlive it. For an owned value that
+/// carries the buffer with it, see [`Esm`].
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Esm<'a> {
+pub struct EsmDirectory<'a> {
     /// The leading `TES3` header record.
     pub header: Tes3<'a>,
     /// All content records following the header, in file order.
     pub records: Vec<Record<'a>>,
 }
 
-impl<'a> Esm<'a> {
-    /// Parse a plugin from an in-memory byte slice. Zero-copy: the returned [`Esm`]
-    /// borrows `input`.
-    pub fn parse(input: &'a [u8]) -> Result<Esm<'a>, EsmError> {
+impl<'a> EsmDirectory<'a> {
+    /// Parse a plugin from an in-memory byte slice. Zero-copy: the returned
+    /// [`EsmDirectory`] borrows `input`.
+    pub fn parse(input: &'a [u8]) -> Result<EsmDirectory<'a>, EsmError> {
         let mut remaining = input;
         let mut records = Vec::new();
         let mut header: Option<Tes3> = None;
@@ -119,7 +115,7 @@ impl<'a> Esm<'a> {
             remaining = rest;
         }
 
-        Ok(Esm {
+        Ok(EsmDirectory {
             header: header.unwrap_or_default(),
             records,
         })

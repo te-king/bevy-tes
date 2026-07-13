@@ -15,7 +15,7 @@ use tes3_esm::records::cell::CellFlags;
 use tes3_esm::records::land::Land;
 use tes3_esm::records::ligh::LightData;
 use tes3_esm::records::ltex::Ltex;
-use tes3_esm::{Esm, L1Str, Record};
+use tes3_esm::{EsmDirectory, L1Str, Record};
 
 /// Identifies a cell within a plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -78,15 +78,15 @@ pub struct ObjectInfo {
     pub light: Option<LightData>,
 }
 
-/// Lookups over a parsed [`Esm`]: editor id → [`ObjectInfo`], and [`CellId`] →
+/// Lookups over a parsed [`EsmDirectory`]: editor id → [`ObjectInfo`], and [`CellId`] →
 /// `CELL` record. Built once by the ESM loader; see the [module docs](self).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EsmIndex {
     /// Lowercased editor id → object info.
     objects: HashMap<String, ObjectInfo>,
-    /// Lowercased interior cell name → index into `Esm::records`.
+    /// Lowercased interior cell name → index into `EsmDirectory::records`.
     interiors: HashMap<String, usize>,
-    /// Exterior grid → index into `Esm::records`.
+    /// Exterior grid → index into `EsmDirectory::records`.
     exteriors: HashMap<(i32, i32), usize>,
     /// Exterior grid → index of the cell's `LAND` record.
     lands: HashMap<(i32, i32), usize>,
@@ -98,7 +98,7 @@ pub struct EsmIndex {
 impl EsmIndex {
     /// Build the index in one pass over the plugin's records. Later records win on id
     /// collision, mirroring the game's last-definition-wins rule within a file.
-    pub fn build(esm: &Esm<'_>) -> EsmIndex {
+    pub fn build(esm: &EsmDirectory<'_>) -> EsmIndex {
         let mut index = EsmIndex::default();
         for (i, record) in esm.records.iter().enumerate() {
             match record {
@@ -161,7 +161,7 @@ impl EsmIndex {
     }
 
     /// Look up a cell record by id (interior names match case-insensitively).
-    pub fn cell<'p>(&self, esm: &'p Esm<'p>, id: &CellId) -> Option<&'p Cell<'p>> {
+    pub fn cell<'p>(&self, esm: &'p EsmDirectory<'p>, id: &CellId) -> Option<&'p Cell<'p>> {
         let i = match id {
             CellId::Interior(name) => *self.interiors.get(&name.to_lowercase())?,
             CellId::Exterior { x, y } => *self.exteriors.get(&(*x, *y))?,
@@ -173,7 +173,7 @@ impl EsmIndex {
     }
 
     /// Look up an exterior cell's `LAND` record by grid coordinates.
-    pub fn land<'p>(&self, esm: &'p Esm<'p>, x: i32, y: i32) -> Option<&'p Land<'p>> {
+    pub fn land<'p>(&self, esm: &'p EsmDirectory<'p>, x: i32, y: i32) -> Option<&'p Land<'p>> {
         match esm.records.get(*self.lands.get(&(x, y))?) {
             Some(Record::Land(land)) => Some(land),
             _ => None,
@@ -182,7 +182,7 @@ impl EsmIndex {
 
     /// Look up a landscape texture by its `LTEX` index (what a LAND `VTEX` value − 1
     /// refers to).
-    pub fn ltex<'p>(&self, esm: &'p Esm<'p>, index: u32) -> Option<&'p Ltex<'p>> {
+    pub fn ltex<'p>(&self, esm: &'p EsmDirectory<'p>, index: u32) -> Option<&'p Ltex<'p>> {
         match esm.records.get(*self.ltexs.get(&index)?) {
             Some(Record::Ltex(ltex)) => Some(ltex),
             _ => None,
@@ -228,8 +228,8 @@ mod tests {
         L1Str::from_bytes(s.as_bytes())
     }
 
-    fn synthetic_plugin() -> Esm<'static> {
-        Esm {
+    fn synthetic_plugin() -> EsmDirectory<'static> {
+        EsmDirectory {
             header: Default::default(),
             records: vec![
                 Record::Stat(Stat {

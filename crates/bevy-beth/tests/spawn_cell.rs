@@ -21,7 +21,7 @@ use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags, VTEX_GRI
 use tes3_esm::records::ligh::{Ligh, LightData};
 use tes3_esm::records::ltex::Ltex;
 use tes3_esm::records::stat::Stat;
-use tes3_esm::{Esm, L1Str, Record};
+use tes3_esm::{EsmDirectory, L1Str, Record};
 
 use bevy_beth::{
     CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
@@ -52,7 +52,7 @@ fn reference(
 /// model doesn't exist in any VFS), a model-less light, a creature (skipped), a disabled
 /// static (skipped), an unknown id (skipped) — plus water.
 fn synthetic_asset() -> EsmAsset {
-    let esm = Esm {
+    let esm = EsmDirectory {
         header: Default::default(),
         records: vec![
             Record::Stat(Stat {
@@ -202,7 +202,7 @@ fn vtex_bytes(logical: &[u16; VTEX_GRID * VTEX_GRID]) -> Vec<u8> {
 /// With `vtex`, the LAND also carries a texture grid — value 1 (LTEX 0, `tx_a.dds`)
 /// everywhere except texel (5, 9), which is value 2 (LTEX 1, `tx_b.dds`).
 fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
-    // The synthetic Esm is 'static, so the computed VTEX blob is leaked (a few hundred
+    // The synthetic EsmDirectory is 'static, so the computed VTEX blob is leaked (a few hundred
     // bytes, once per test).
     let texture_data = vtex.then(|| {
         let mut logical = [1u16; VTEX_GRID * VTEX_GRID];
@@ -210,7 +210,7 @@ fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
         &*Box::leak(vtex_bytes(&logical).into_boxed_slice())
     });
     static ZERO_HEIGHTS: [u8; LAND_GRID * LAND_GRID] = [0; LAND_GRID * LAND_GRID];
-    let esm = Esm {
+    let esm = EsmDirectory {
         header: Default::default(),
         records: vec![
             Record::Stat(Stat {

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
-use tes3_esm::Esm;
+use tes3_esm::EsmDirectory;
 use tes3_esm::records::tes3::HeaderFlags;
 
 /// Inspect a Morrowind (TES3) plugin file.
@@ -37,7 +37,7 @@ fn run_esm(path: &Path) -> ExitCode {
         Ok(m) => m,
         Err(e) => return fail(path, &e),
     };
-    let plugin = match Esm::parse(&mmap) {
+    let plugin = match EsmDirectory::parse(&mmap) {
         Ok(p) => p,
         Err(e) => return fail(path, &e),
     };

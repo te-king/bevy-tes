@@ -11,6 +11,7 @@ bitflags = { workspace = true }
 tes-core = { workspace = true }
 thiserror = { workspace = true }
 nom = { workspace = true }
+self_cell = { workspace = true }
 
 [dev-dependencies]
 tes-testdata = { workspace = true }
