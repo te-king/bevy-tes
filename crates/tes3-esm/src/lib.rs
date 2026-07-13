@@ -1,15 +1,17 @@
 //! TES3 (Morrowind) plugin format parsing.
 //!
 //! A plugin file is a flat sequence of records: a leading [`Tes3`](records::tes3::Tes3)
-//! header followed by content records. Parsing copies into owned structures: the parsed
-//! [`Esm`] and its records own their strings ([`L1String`](crate::L1String)) and
-//! binary blobs, so the `Esm` is `'static` and the input buffer is only borrowed for
-//! the duration of the parse call:
+//! header followed by content records. Parsing is zero-copy: the parsed [`Esm`] and its
+//! records borrow their strings ([`&L1Str`](crate::L1Str)) and binary blobs from the
+//! input buffer, which must therefore outlive the `Esm`:
 //!
 //! ```no_run
 //! let bytes = std::fs::read("data/Morrowind.esm").unwrap();
 //! let esm = tes3_esm::Esm::parse(&bytes).unwrap();
 //! ```
+//!
+//! To bundle the buffer and the parsed view in one owned value, see `bevy_beth`'s
+//! `EsmAsset` (a self-referential wrapper over both).
 
 pub mod common;
 mod macros;
@@ -80,19 +82,20 @@ records! {
     Sscr(Sscr) = b"SSCR",
 }
 
-/// A fully parsed TES3 plugin (`.esm`/`.esp`). Owns all of its data, so it is `'static`.
+/// A fully parsed TES3 plugin (`.esm`/`.esp`). Borrows its strings and blobs from the
+/// input buffer, which must outlive it.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Esm {
+pub struct Esm<'a> {
     /// The leading `TES3` header record.
-    pub header: Tes3,
+    pub header: Tes3<'a>,
     /// All content records following the header, in file order.
-    pub records: Vec<Record>,
+    pub records: Vec<Record<'a>>,
 }
 
-impl Esm {
-    /// Parse a plugin from an in-memory byte slice. The returned [`Esm`] owns its data
-    /// (copied out of `input`), so it does not borrow `input` after this returns.
-    pub fn parse(input: &[u8]) -> Result<Esm, EsmError> {
+impl<'a> Esm<'a> {
+    /// Parse a plugin from an in-memory byte slice. Zero-copy: the returned [`Esm`]
+    /// borrows `input`.
+    pub fn parse(input: &'a [u8]) -> Result<Esm<'a>, EsmError> {
         let mut remaining = input;
         let mut records = Vec::new();
         let mut header: Option<Tes3> = None;
@@ -107,6 +110,9 @@ impl Esm {
             if let Record::Tes3(h) = &record
                 && header.is_none()
             {
+                // Every record consumes at least a 16-byte header, which caps how much a
+                // hostile num_records can over-reserve.
+                records.reserve((h.num_records as usize).min(remaining.len() / 16));
                 header = Some(h.clone());
             }
             records.push(record);

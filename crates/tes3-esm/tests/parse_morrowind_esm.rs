@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use tes3_esm::records::tes3::HeaderFlags;
 use tes3_esm::{Esm, Record};
 
-/// Read the file into an owned buffer to parse. The parsed `Esm` owns its data, so it
-/// no longer depends on this buffer once parsing returns. The file is gitignored,
+/// Read the file into an owned buffer to parse. The parsed `Esm` borrows from this
+/// buffer, so each test keeps it alive alongside the parse. The file is gitignored,
 /// locally supplied game data; `None` means skip the test.
 fn load_bytes() -> Option<Vec<u8>> {
     tes_testdata::read("Morrowind.esm")
@@ -25,7 +25,7 @@ fn header_is_decoded() {
         plugin.header.flags.contains(HeaderFlags::MASTER),
         "ESM should be flagged master"
     );
-    assert_eq!(plugin.header.company, "Bethesda Softworks"); // L1String: PartialEq<&str>
+    assert_eq!(plugin.header.company, "Bethesda Softworks"); // L1Str: PartialEq<&str>
     // The header declares the number of records that follow it.
     assert_eq!(plugin.header.num_records as usize, plugin.records.len() - 1);
 }
@@ -134,7 +134,7 @@ fn strings_are_stored_undecoded_and_decode_lazily() {
     use std::borrow::Cow;
     let Some(bytes) = load_bytes() else { return };
     let plugin = Esm::parse(&bytes).unwrap();
-    // The L1String stores the raw Windows-1252 bytes as-is; the parser never transcoded
+    // The L1Str views the raw Windows-1252 bytes as-is; the parser never transcoded
     // them.
     assert_eq!(plugin.header.company.as_bytes(), b"Bethesda Softworks");
     // Decoding the ASCII name on demand still borrows rather than allocating.

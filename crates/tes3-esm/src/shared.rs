@@ -2,14 +2,15 @@
 //! inventory items, AI data and packages, etc.). Keeping them here avoids duplicating
 //! the parsers across the item/actor record modules.
 //!
-//! String-bearing types own their text as [`L1String`](crate::L1String) (decoded on
-//! demand); purely numeric types ([`Effect`], [`AiData`], [`AmbientLight`]) are `Copy`.
+//! String-bearing types borrow their text from the input as [`&L1Str`](crate::L1Str)
+//! (decoded on demand); purely numeric types ([`Effect`], [`AiData`], [`AmbientLight`])
+//! are `Copy`.
 
 use super::common::{Color, color, enumeration, fixed_l1str, flags};
 use crate::macros::enum_field;
 use nom::IResult;
 use nom::number::complete::{le_f32, le_i8, le_i32, le_u8, le_u16, le_u32};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Services offered by an actor or auto-calculated for a class. Shared by the
@@ -96,14 +97,14 @@ pub fn effect(input: &[u8]) -> IResult<&[u8], Effect> {
 
 /// A carried/contained inventory entry (`NPCO`, 36 bytes). Shared by CONT, CREA, NPC_.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct InventoryItem {
+pub struct InventoryItem<'a> {
     /// Object count; negative counts indicate restocking.
     pub count: i32,
     /// ID of the contained object.
-    pub object: L1String,
+    pub object: &'a L1Str,
 }
 
-pub fn inventory_item(input: &[u8]) -> IResult<&[u8], InventoryItem> {
+pub fn inventory_item(input: &[u8]) -> IResult<&[u8], InventoryItem<'_>> {
     let (input, count) = le_i32(input)?;
     let (input, object) = fixed_l1str(32)(input)?;
     Ok((input, InventoryItem { count, object }))
@@ -142,15 +143,15 @@ pub fn ai_data(input: &[u8]) -> IResult<&[u8], AiData> {
 /// A cell travel destination (`DODT` 24 bytes) plus an optional interior cell name
 /// (`DNAM`). Shared by CREA, NPC_ and CELL references.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct TravelDestination {
+pub struct TravelDestination<'a> {
     pub position: [f32; 3],
     pub rotation: [f32; 3],
     /// Interior cell name, from a following `DNAM` subrecord.
-    pub cell: Option<L1String>,
+    pub cell: Option<&'a L1Str>,
 }
 
 /// Parse the 24-byte `DODT` payload (position + rotation); `cell` is filled in later.
-pub fn travel_destination(input: &[u8]) -> IResult<&[u8], TravelDestination> {
+pub fn travel_destination(input: &[u8]) -> IResult<&[u8], TravelDestination<'_>> {
     let (input, px) = le_f32(input)?;
     let (input, py) = le_f32(input)?;
     let (input, pz) = le_f32(input)?;
@@ -170,22 +171,22 @@ pub fn travel_destination(input: &[u8]) -> IResult<&[u8], TravelDestination> {
 /// An AI package attached to an actor (CREA / NPC_). The order of packages defines
 /// their priority.
 #[derive(Debug, Clone, PartialEq)]
-pub enum AiPackage {
+pub enum AiPackage<'a> {
     /// `AI_A` — activate a named object.
-    Activate { name: L1String },
+    Activate { name: &'a L1Str },
     /// `AI_E` — escort to a position (with optional destination cell from `CNDT`).
     Escort {
         position: [f32; 3],
         duration: u16,
-        id: L1String,
-        cell: Option<L1String>,
+        id: &'a L1Str,
+        cell: Option<&'a L1Str>,
     },
     /// `AI_F` — follow a target (with optional destination cell from `CNDT`).
     Follow {
         position: [f32; 3],
         duration: u16,
-        id: L1String,
-        cell: Option<L1String>,
+        id: &'a L1Str,
+        cell: Option<&'a L1Str>,
     },
     /// `AI_T` — travel to a position.
     Travel { position: [f32; 3] },
@@ -198,16 +199,16 @@ pub enum AiPackage {
     },
 }
 
-pub fn ai_activate(input: &[u8]) -> IResult<&[u8], AiPackage> {
+pub fn ai_activate(input: &[u8]) -> IResult<&[u8], AiPackage<'_>> {
     let (input, name) = fixed_l1str(32)(input)?;
     Ok((input, AiPackage::Activate { name }))
 }
 
 /// Shared decoded body of the `AI_E`/`AI_F` packages: (position, duration, id).
-type EscortFollow = ([f32; 3], u16, L1String);
+type EscortFollow<'a> = ([f32; 3], u16, &'a L1Str);
 
 /// Shared body of the `AI_E` (escort) and `AI_F` (follow) 48-byte packages.
-fn ai_escort_follow(input: &[u8]) -> IResult<&[u8], EscortFollow> {
+fn ai_escort_follow(input: &[u8]) -> IResult<&[u8], EscortFollow<'_>> {
     let (input, x) = le_f32(input)?;
     let (input, y) = le_f32(input)?;
     let (input, z) = le_f32(input)?;
@@ -216,7 +217,7 @@ fn ai_escort_follow(input: &[u8]) -> IResult<&[u8], EscortFollow> {
     Ok((input, ([x, y, z], duration, id)))
 }
 
-pub fn ai_escort(input: &[u8]) -> IResult<&[u8], AiPackage> {
+pub fn ai_escort(input: &[u8]) -> IResult<&[u8], AiPackage<'_>> {
     let (input, (position, duration, id)) = ai_escort_follow(input)?;
     Ok((
         input,
@@ -229,7 +230,7 @@ pub fn ai_escort(input: &[u8]) -> IResult<&[u8], AiPackage> {
     ))
 }
 
-pub fn ai_follow(input: &[u8]) -> IResult<&[u8], AiPackage> {
+pub fn ai_follow(input: &[u8]) -> IResult<&[u8], AiPackage<'_>> {
     let (input, (position, duration, id)) = ai_escort_follow(input)?;
     Ok((
         input,
@@ -242,7 +243,7 @@ pub fn ai_follow(input: &[u8]) -> IResult<&[u8], AiPackage> {
     ))
 }
 
-pub fn ai_travel(input: &[u8]) -> IResult<&[u8], AiPackage> {
+pub fn ai_travel(input: &[u8]) -> IResult<&[u8], AiPackage<'_>> {
     let (input, x) = le_f32(input)?;
     let (input, y) = le_f32(input)?;
     let (input, z) = le_f32(input)?;
@@ -254,7 +255,7 @@ pub fn ai_travel(input: &[u8]) -> IResult<&[u8], AiPackage> {
     ))
 }
 
-pub fn ai_wander(input: &[u8]) -> IResult<&[u8], AiPackage> {
+pub fn ai_wander(input: &[u8]) -> IResult<&[u8], AiPackage<'_>> {
     let (input, distance) = le_u16(input)?;
     let (input, duration) = le_u16(input)?;
     let (input, time_of_day) = le_u8(input)?;
@@ -279,11 +280,11 @@ pub fn ai_wander(input: &[u8]) -> IResult<&[u8], AiPackage> {
 /// A biped equipment slot entry (`INDX` + optional `BNAM`/`CNAM`). Shared by ARMO and
 /// CLOT, describing which body part a model piece applies to.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct BipedItem {
+pub struct BipedItem<'a> {
     /// Biped object index (body part slot).
     pub index: u8,
-    pub male_model: Option<L1String>,
-    pub female_model: Option<L1String>,
+    pub male_model: Option<&'a L1Str>,
+    pub female_model: Option<&'a L1Str>,
 }
 
 /// Ambient lighting block (`AMBI`, 16 bytes) found in interior CELL records.

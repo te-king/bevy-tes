@@ -5,7 +5,7 @@ use crate::common::{
 };
 use nom::multi::many0;
 use nom::{IResult, Parser};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PathGridData {
@@ -71,17 +71,17 @@ fn path_point(input: &[u8]) -> IResult<&[u8], PathPoint> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Pgrd {
+pub struct Pgrd<'a> {
     pub data: PathGridData,
     /// Cell name the path grid belongs to.
-    pub cell: L1String,
+    pub cell: &'a L1Str,
     pub points: Vec<PathPoint>,
     /// Flattened edge list; index into `points`, grouped per point by connection count.
     pub connections: Vec<u32>,
 }
 
-impl Pgrd {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Pgrd {
+impl<'a> Pgrd<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Pgrd<'a> {
         let mut out = Pgrd::default();
         for sub in subs {
             match &sub.tag.0 {

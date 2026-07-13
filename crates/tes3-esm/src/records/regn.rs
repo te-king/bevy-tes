@@ -2,7 +2,7 @@
 
 use crate::common::{Color, Subrecord, color, finish, fixed_l1str, l1, le_u8};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 /// Per-weather-type spawn chances. Snow/blizzard are only present in v1.3 files.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -48,30 +48,30 @@ fn weather(input: &[u8]) -> IResult<&[u8], WeatherChances> {
 
 /// A sound that may play in the region (`SNAM`, 33 bytes).
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct SoundChance {
-    pub sound: L1String,
+pub struct SoundChance<'a> {
+    pub sound: &'a L1Str,
     pub chance: u8,
 }
 
-fn sound_chance(input: &[u8]) -> IResult<&[u8], SoundChance> {
+fn sound_chance(input: &[u8]) -> IResult<&[u8], SoundChance<'_>> {
     let (input, sound) = fixed_l1str(32)(input)?;
     let (input, chance) = le_u8(input)?;
     Ok((input, SoundChance { sound, chance }))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Regn {
-    pub id: L1String,
-    pub name: L1String,
+pub struct Regn<'a> {
+    pub id: &'a L1Str,
+    pub name: &'a L1Str,
     pub weather: WeatherChances,
     /// Creature spawned while sleeping.
-    pub sleep_creature: Option<L1String>,
+    pub sleep_creature: Option<&'a L1Str>,
     pub map_color: Color,
-    pub sounds: Vec<SoundChance>,
+    pub sounds: Vec<SoundChance<'a>>,
 }
 
-impl Regn {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Regn {
+impl<'a> Regn<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Regn<'a> {
         let mut out = Regn::default();
         for sub in subs {
             match &sub.tag.0 {

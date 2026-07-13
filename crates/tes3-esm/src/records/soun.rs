@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, l1, le_u8, parse_or_default};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SoundData {
@@ -27,14 +27,14 @@ fn sound_data(input: &[u8]) -> IResult<&[u8], SoundData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Soun {
-    pub id: L1String,
-    pub filename: L1String,
+pub struct Soun<'a> {
+    pub id: &'a L1Str,
+    pub filename: &'a L1Str,
     pub data: SoundData,
 }
 
-impl Soun {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Soun {
+impl<'a> Soun<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Soun<'a> {
         let mut out = Soun::default();
         for sub in subs {
             match &sub.tag.0 {

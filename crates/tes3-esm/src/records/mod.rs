@@ -4,6 +4,11 @@
 //! typed value from the record's already-parsed list of [`Subrecord`](super::common::Subrecord)s.
 //! Field assignment is order-tolerant where the format allows it and sequential where
 //! fields are positionally coupled (e.g. `MAST`/`DATA` pairs, AI packages).
+//!
+//! The `from_subrecords` loops are deliberately hand-written rather than macro-generated:
+//! roughly a quarter of the records are stateful scans (CELL's reference phases, TES3's
+//! `MAST`/`DATA` pairing, LEVC/LEVI's `last_mut` coupling, NPC_/CREA's length-dispatched
+//! `NPDT`), so a dispatch macro would split the crate into two idioms for little gain.
 
 pub mod acti;
 pub mod alch;

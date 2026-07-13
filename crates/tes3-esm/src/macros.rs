@@ -8,22 +8,22 @@
 /// `Variant(Type) = b"TAG"` table, so each record type is listed exactly once instead of
 /// three times (variant, tag accessor, parser dispatch).
 macro_rules! records {
-    ($( $variant:ident($ty:ty) = $tag:literal, )*) => {
+    ($( $variant:ident($ty:ident) = $tag:literal, )*) => {
         /// A single parsed record. One variant per known TES3 record type, plus
         /// [`Record::Unknown`] as a safety net for tags not modeled by this crate.
-        /// Records own their data and are `'static`.
+        /// Records borrow their strings and blobs from the parsed input buffer.
         #[derive(Debug, Clone, PartialEq)]
-        pub enum Record {
-            $( $variant($ty), )*
+        pub enum Record<'a> {
+            $( $variant($ty<'a>), )*
             /// A record whose 4-byte tag is not recognized; its raw payload is preserved.
             Unknown {
                 tag: Tag,
                 flags: RecordFlags,
-                data: Vec<u8>,
+                data: &'a [u8],
             },
         }
 
-        impl Record {
+        impl<'a> Record<'a> {
             /// The 4-byte tag of this record.
             pub fn tag(&self) -> Tag {
                 match self {
@@ -33,18 +33,14 @@ macro_rules! records {
             }
 
             /// Build a typed record from its tag, header flags and data block.
-            fn from_parts(tag: Tag, flags: RecordFlags, data: &[u8]) -> Record {
+            fn from_parts(tag: Tag, flags: RecordFlags, data: &'a [u8]) -> Record<'a> {
                 // Subrecords are parsed lazily from `data`; a malformed/truncated
                 // subrecord just ends iteration (the record keeps whatever fields parsed
                 // before it). Only one match arm runs, so moving `subs` into it is fine.
                 let subs = Subrecords::new(data);
                 match &tag.0 {
                     $( $tag => Record::$variant(<$ty>::from_subrecords(subs)), )*
-                    _ => Record::Unknown {
-                        tag,
-                        flags,
-                        data: data.to_vec(),
-                    },
+                    _ => Record::Unknown { tag, flags, data },
                 }
             }
         }

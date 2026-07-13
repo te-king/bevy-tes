@@ -1,7 +1,7 @@
 //! `LEVI` — a leveled item list.
 
 use crate::common::{Subrecord, finish, flags, l1, le_u16};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Leveled item list flags (`DATA`).
@@ -16,22 +16,22 @@ bitflags::bitflags! {
 
 /// One entry in a leveled list: an item ID and the PC level it becomes available at.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct LeveledItem {
-    pub item: L1String,
+pub struct LeveledItem<'a> {
+    pub item: &'a L1Str,
     pub level: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Levi {
-    pub id: L1String,
+pub struct Levi<'a> {
+    pub id: &'a L1Str,
     pub flags: LeveledItemFlags,
     /// Chance that nothing is produced.
     pub chance_none: u8,
-    pub items: Vec<LeveledItem>,
+    pub items: Vec<LeveledItem<'a>>,
 }
 
-impl Levi {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Levi {
+impl<'a> Levi<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Levi<'a> {
         let mut out = Levi::default();
         for sub in subs {
             match &sub.tag.0 {

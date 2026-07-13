@@ -4,7 +4,7 @@ use crate::common::{Subrecord, enumeration, l1, le_f32, le_u16, parse_or_default
 use crate::macros::enum_field;
 use crate::shared::BipedItem;
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 enum_field! {
     /// Clothing slot (`CTDT`).
@@ -47,19 +47,19 @@ fn clothing_data(input: &[u8]) -> IResult<&[u8], ClothingData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Clot {
-    pub id: L1String,
-    pub model: L1String,
-    pub name: Option<L1String>,
+pub struct Clot<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub name: Option<&'a L1Str>,
     pub data: ClothingData,
-    pub script: Option<L1String>,
-    pub icon: Option<L1String>,
-    pub biped: Vec<BipedItem>,
-    pub enchantment: Option<L1String>,
+    pub script: Option<&'a L1Str>,
+    pub icon: Option<&'a L1Str>,
+    pub biped: Vec<BipedItem<'a>>,
+    pub enchantment: Option<&'a L1Str>,
 }
 
-impl Clot {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Clot {
+impl<'a> Clot<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Clot<'a> {
         let mut out = Clot::default();
         for sub in subs {
             match &sub.tag.0 {

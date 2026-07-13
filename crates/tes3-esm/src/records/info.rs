@@ -4,7 +4,7 @@ use crate::common::{Subrecord, enumeration, finish, l1, le_f32, le_u32, parse_or
 use crate::records::dial::DialogueKind;
 use nom::IResult;
 use nom::number::complete::{le_i8, le_u8};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct InfoData {
@@ -42,41 +42,41 @@ fn info_data(input: &[u8]) -> IResult<&[u8], InfoData> {
 
 /// A select/filter function applied to a response (`SCVR` plus an optional value).
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Filter {
-    pub text: L1String,
+pub struct Filter<'a> {
+    pub text: &'a L1Str,
     pub int_value: Option<u32>,
     pub float_value: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Info {
+pub struct Info<'a> {
     /// Unique info ID (`INAM`).
-    pub id: L1String,
+    pub id: &'a L1Str,
     /// Previous info ID in the topic's linked list.
-    pub prev: L1String,
+    pub prev: &'a L1Str,
     /// Next info ID in the topic's linked list.
-    pub next: L1String,
+    pub next: &'a L1Str,
     pub data: Option<InfoData>,
-    pub actor: Option<L1String>,
-    pub race: Option<L1String>,
-    pub class: Option<L1String>,
-    pub faction: Option<L1String>,
-    pub cell: Option<L1String>,
-    pub pc_faction: Option<L1String>,
-    pub sound: Option<L1String>,
+    pub actor: Option<&'a L1Str>,
+    pub race: Option<&'a L1Str>,
+    pub class: Option<&'a L1Str>,
+    pub faction: Option<&'a L1Str>,
+    pub cell: Option<&'a L1Str>,
+    pub pc_faction: Option<&'a L1Str>,
+    pub sound: Option<&'a L1Str>,
     /// Response text (`NAME`).
-    pub response: Option<L1String>,
-    pub filters: Vec<Filter>,
+    pub response: Option<&'a L1Str>,
+    pub filters: Vec<Filter<'a>>,
     /// Result script text (`BNAM`).
-    pub result: Option<L1String>,
+    pub result: Option<&'a L1Str>,
     /// Journal flags.
     pub quest_name: bool,
     pub quest_finished: bool,
     pub quest_restart: bool,
 }
 
-impl Info {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Info {
+impl<'a> Info<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Info<'a> {
         let mut out = Info::default();
         for sub in subs {
             match &sub.tag.0 {

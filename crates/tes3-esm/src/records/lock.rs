@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct LockData {
@@ -29,17 +29,17 @@ fn lock_data(input: &[u8]) -> IResult<&[u8], LockData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Lock {
-    pub id: L1String,
-    pub model: L1String,
-    pub name: Option<L1String>,
+pub struct Lock<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub name: Option<&'a L1Str>,
     pub data: LockData,
-    pub script: Option<L1String>,
-    pub icon: Option<L1String>,
+    pub script: Option<&'a L1Str>,
+    pub icon: Option<&'a L1Str>,
 }
 
-impl Lock {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Lock {
+impl<'a> Lock<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Lock<'a> {
         let mut out = Lock::default();
         for sub in subs {
             match &sub.tag.0 {

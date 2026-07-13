@@ -3,7 +3,7 @@
 use crate::common::{Subrecord, enumeration, finish, flags, l1, le_f32, le_u32, parse_or_default};
 use crate::macros::enum_field;
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Magic effect flags (`MEDT`). Only these bits are stored in the file; behavior
@@ -68,25 +68,25 @@ fn magic_effect_data(input: &[u8]) -> IResult<&[u8], MagicEffectData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Mgef {
+pub struct Mgef<'a> {
     /// Effect index (names are hardcoded in the engine).
     pub index: u32,
     pub data: MagicEffectData,
-    pub icon: Option<L1String>,
-    pub particle_texture: Option<L1String>,
-    pub bolt_sound: Option<L1String>,
-    pub casting_sound: Option<L1String>,
-    pub hit_sound: Option<L1String>,
-    pub area_sound: Option<L1String>,
-    pub casting_visual: Option<L1String>,
-    pub bolt_visual: Option<L1String>,
-    pub hit_visual: Option<L1String>,
-    pub area_visual: Option<L1String>,
-    pub description: Option<L1String>,
+    pub icon: Option<&'a L1Str>,
+    pub particle_texture: Option<&'a L1Str>,
+    pub bolt_sound: Option<&'a L1Str>,
+    pub casting_sound: Option<&'a L1Str>,
+    pub hit_sound: Option<&'a L1Str>,
+    pub area_sound: Option<&'a L1Str>,
+    pub casting_visual: Option<&'a L1Str>,
+    pub bolt_visual: Option<&'a L1Str>,
+    pub hit_visual: Option<&'a L1Str>,
+    pub area_visual: Option<&'a L1Str>,
+    pub description: Option<&'a L1Str>,
 }
 
-impl Mgef {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Mgef {
+impl<'a> Mgef<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Mgef<'a> {
         let mut out = Mgef::default();
         for sub in subs {
             match &sub.tag.0 {

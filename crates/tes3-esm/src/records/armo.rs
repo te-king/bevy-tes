@@ -4,7 +4,7 @@ use crate::common::{Subrecord, enumeration, l1, le_f32, le_u32, parse_or_default
 use crate::macros::enum_field;
 use crate::shared::BipedItem;
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 enum_field! {
     /// Armor slot (`AODT`).
@@ -54,20 +54,20 @@ fn armor_data(input: &[u8]) -> IResult<&[u8], ArmorData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Armo {
-    pub id: L1String,
-    pub model: L1String,
-    pub name: L1String,
-    pub script: Option<L1String>,
+pub struct Armo<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub name: &'a L1Str,
+    pub script: Option<&'a L1Str>,
     pub data: ArmorData,
-    pub icon: Option<L1String>,
+    pub icon: Option<&'a L1Str>,
     /// Biped slots (`INDX` with optional `BNAM`/`CNAM` model overrides).
-    pub biped: Vec<BipedItem>,
-    pub enchantment: Option<L1String>,
+    pub biped: Vec<BipedItem<'a>>,
+    pub enchantment: Option<&'a L1Str>,
 }
 
-impl Armo {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Armo {
+impl<'a> Armo<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Armo<'a> {
         let mut out = Armo::default();
         for sub in subs {
             match &sub.tag.0 {

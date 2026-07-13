@@ -1,27 +1,27 @@
 //! `GMST` — a game setting.
 
 use crate::common::{Subrecord, finish, l1, le_f32, le_i32};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 /// A game setting's value. The type is determined by which value subrecord is present;
 /// a setting may also have no value at all.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub enum GmstValue {
+pub enum GmstValue<'a> {
     #[default]
     None,
     Float(f32),
     Int(i32),
-    Str(L1String),
+    Str(&'a L1Str),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Gmst {
-    pub id: L1String,
-    pub value: GmstValue,
+pub struct Gmst<'a> {
+    pub id: &'a L1Str,
+    pub value: GmstValue<'a>,
 }
 
-impl Gmst {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Gmst {
+impl<'a> Gmst<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Gmst<'a> {
         let mut out = Gmst::default();
         for sub in subs {
             match &sub.tag.0 {

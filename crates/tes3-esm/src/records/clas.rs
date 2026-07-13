@@ -3,7 +3,7 @@
 use crate::common::{Subrecord, enumeration, flags, l1, le_u32, parse_or_default};
 use crate::shared::{ServiceFlags, Specialization};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Class flags (`CLDT`).
@@ -52,15 +52,15 @@ fn class_data(input: &[u8]) -> IResult<&[u8], ClassData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Clas {
-    pub id: L1String,
-    pub name: L1String,
+pub struct Clas<'a> {
+    pub id: &'a L1Str,
+    pub name: &'a L1Str,
     pub data: ClassData,
-    pub description: Option<L1String>,
+    pub description: Option<&'a L1Str>,
 }
 
-impl Clas {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Clas {
+impl<'a> Clas<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Clas<'a> {
         let mut out = Clas::default();
         for sub in subs {
             match &sub.tag.0 {

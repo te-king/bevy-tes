@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, finish, fixed_l1str, flags, l1, le_f32, le_u32, le_u64};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Plugin header flags (`HEDR`).
@@ -15,30 +15,30 @@ bitflags::bitflags! {
 
 /// A master file this plugin depends on (a `MAST`/`DATA` pair).
 #[derive(Debug, Clone, PartialEq)]
-pub struct Master {
-    pub name: L1String,
+pub struct Master<'a> {
+    pub name: &'a L1Str,
     /// Size of the master file in bytes, used for version tracking.
     pub size: u64,
 }
 
 /// The `TES3` header record.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Tes3 {
+pub struct Tes3<'a> {
     /// File format version (1.2 for Morrowind, 1.3 for Tribunal/Bloodmoon).
     pub version: f32,
     pub flags: HeaderFlags,
-    pub company: L1String,
-    pub description: L1String,
+    pub company: &'a L1Str,
+    pub description: &'a L1Str,
     /// Number of records following this header.
     pub num_records: u32,
-    pub masters: Vec<Master>,
+    pub masters: Vec<Master<'a>>,
 }
 
 /// Decoded `HEDR` fields: (version, flags, company, description, record count).
-type HedrFields = (f32, HeaderFlags, L1String, L1String, u32);
+type HedrFields<'a> = (f32, HeaderFlags, &'a L1Str, &'a L1Str, u32);
 
 /// Parse the 300-byte `HEDR` payload.
-fn hedr(input: &[u8]) -> IResult<&[u8], HedrFields> {
+fn hedr(input: &[u8]) -> IResult<&[u8], HedrFields<'_>> {
     let (input, version) = le_f32(input)?;
     let (input, flags) = flags(input)?;
     let (input, company) = fixed_l1str(32)(input)?;
@@ -47,10 +47,10 @@ fn hedr(input: &[u8]) -> IResult<&[u8], HedrFields> {
     Ok((input, (version, flags, company, description, num_records)))
 }
 
-impl Tes3 {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Tes3 {
+impl<'a> Tes3<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Tes3<'a> {
         let mut out = Tes3::default();
-        let mut pending_master: Option<L1String> = None;
+        let mut pending_master: Option<&'a L1Str> = None;
         for sub in subs {
             match &sub.tag.0 {
                 b"HEDR" => {

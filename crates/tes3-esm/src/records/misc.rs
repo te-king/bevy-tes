@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, flags, l1, le_f32, le_u32, parse_or_default};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Miscellaneous item flags (`MCDT`).
@@ -34,17 +34,17 @@ fn misc_data(input: &[u8]) -> IResult<&[u8], MiscData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Misc {
-    pub id: L1String,
-    pub model: L1String,
-    pub name: Option<L1String>,
+pub struct Misc<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub name: Option<&'a L1Str>,
     pub data: MiscData,
-    pub script: Option<L1String>,
-    pub icon: Option<L1String>,
+    pub script: Option<&'a L1Str>,
+    pub icon: Option<&'a L1Str>,
 }
 
-impl Misc {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Misc {
+impl<'a> Misc<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Misc<'a> {
         let mut out = Misc::default();
         for sub in subs {
             match &sub.tag.0 {
