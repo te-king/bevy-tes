@@ -33,7 +33,7 @@ macro_rules! records {
             }
 
             /// Build a typed record from its tag, header flags and data block.
-            fn from_parts(tag: Tag, flags: RecordFlags, data: &'a [u8]) -> Record<'a> {
+            pub(crate) fn from_parts(tag: Tag, flags: RecordFlags, data: &'a [u8]) -> Record<'a> {
                 // Subrecords are parsed lazily from `data`; a malformed/truncated
                 // subrecord just ends iteration (the record keeps whatever fields parsed
                 // before it). Only one match arm runs, so moving `subs` into it is fine.

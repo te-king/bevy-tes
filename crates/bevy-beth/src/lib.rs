@@ -70,9 +70,8 @@ use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, Assets, LoadContext
 use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
-use self_cell::self_cell;
 use tes_nif::{Nif, NifError};
-use tes3_esm::{Esm, EsmError};
+use tes3_esm::{Esm, EsmDirectory, EsmError};
 
 pub mod index;
 pub mod vfs;
@@ -111,49 +110,41 @@ pub const TES_SOURCE: &str = "tes";
 #[derive(Resource, Clone)]
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
-/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`]: the raw file bytes
-/// plus the zero-copy [`Esm`] view borrowing them (reach it via [`EsmAsset::esm`]).
+/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`]: an owned [`Esm`]
+/// (the file bytes plus the zero-copy [`EsmDirectory`] view borrowing them, reached via
+/// [`EsmAsset::esm`]) alongside a lookup index over its records.
 #[derive(Asset, TypePath)]
 pub struct EsmAsset {
-    internal: EsmInternal,
+    esm: Esm,
     /// Lookups over the records (editor id → object, cell name/grid → `CELL`), built
     /// once at load time. Fully owned, so it sits beside the parsed view.
     pub index: EsmIndex,
 }
 
-self_cell!(
-    struct EsmInternal {
-        owner: Vec<u8>,
-
-        #[covariant]
-        dependent: Esm,
-    }
-);
-
 impl EsmAsset {
     /// Parse `bytes` and build the index. The bytes stay alive inside the asset; the
     /// parsed records borrow them.
     pub fn parse(bytes: Vec<u8>) -> Result<EsmAsset, EsmError> {
-        let internal = EsmInternal::try_new(bytes, |bytes| Esm::parse(bytes))?;
-        let index = EsmIndex::build(internal.borrow_dependent());
-        Ok(EsmAsset { internal, index })
+        let esm = Esm::parse(bytes)?;
+        let index = EsmIndex::build(esm.directory());
+        Ok(EsmAsset { esm, index })
     }
 
-    /// Wrap an in-memory `Esm<'static>` (e.g. a synthetic test plugin built from
-    /// `&'static` literals) without a backing buffer.
-    pub fn from_static(esm: Esm<'static>) -> EsmAsset {
-        let internal = EsmInternal::new(Vec::new(), |_| esm);
-        let index = EsmIndex::build(internal.borrow_dependent());
-        EsmAsset { internal, index }
+    /// Wrap an in-memory [`EsmDirectory<'static>`] (e.g. a synthetic test plugin built
+    /// from `&'static` literals) without a backing buffer.
+    pub fn from_static(directory: EsmDirectory<'static>) -> EsmAsset {
+        let esm = Esm::from_static(directory);
+        let index = EsmIndex::build(esm.directory());
+        EsmAsset { esm, index }
     }
 
-    /// The parsed plugin: header plus all records in file order.
-    pub fn esm(&self) -> &Esm<'_> {
-        self.internal.borrow_dependent()
+    /// The parsed plugin directory: header plus all records in file order.
+    pub fn esm(&self) -> &EsmDirectory<'_> {
+        self.esm.directory()
     }
 }
 
-// Manual: self_cell's generated Debug would print the raw file bytes.
+// Manual: the owned Esm's buffer must not leak into the asset's Debug output.
 impl std::fmt::Debug for EsmAsset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EsmAsset")

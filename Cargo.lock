@@ -4726,6 +4726,7 @@ dependencies = [
  "clap",
  "memmap2",
  "nom",
+ "self_cell",
  "tes-core",
  "tes-testdata",
  "thiserror 2.0.18",

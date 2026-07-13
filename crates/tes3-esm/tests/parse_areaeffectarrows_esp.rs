@@ -1,14 +1,14 @@
 //! End-to-end test parsing a plugin (`.esp`) rather than a master (`.esm`).
 //!
 //! In TES3, ESP and ESM share one binary format; the only difference is bit `0x1`
-//! ("treat as master") in the `HEDR` flags. This test proves `Esm::parse` reads a
+//! ("treat as master") in the `HEDR` flags. This test proves `EsmDirectory::parse` reads a
 //! plugin unchanged, that the master flag is *clear*, and that a plugin's master
 //! dependency (`MAST`/`DATA`) is decoded.
 
 use std::collections::BTreeMap;
 
 use tes3_esm::records::tes3::HeaderFlags;
-use tes3_esm::{Esm, Record};
+use tes3_esm::{EsmDirectory, Record};
 
 /// The file is gitignored, locally supplied game data; `None` means skip the test.
 fn load_bytes() -> Option<Vec<u8>> {
@@ -18,7 +18,7 @@ fn load_bytes() -> Option<Vec<u8>> {
 #[test]
 fn header_is_v12_plugin() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Esm::parse(&bytes).unwrap();
+    let plugin = EsmDirectory::parse(&bytes).unwrap();
     assert_eq!(plugin.header.version, 1.2);
     // The defining ESP-vs-ESM property: the master flag is clear (inverse of an ESM).
     assert!(
@@ -31,7 +31,7 @@ fn header_is_v12_plugin() {
 #[test]
 fn depends_on_morrowind_master() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Esm::parse(&bytes).unwrap();
+    let plugin = EsmDirectory::parse(&bytes).unwrap();
     // A plugin's HEDR carries MAST/DATA pairs for the masters it extends.
     assert_eq!(plugin.header.masters.len(), 1);
     let master = &plugin.header.masters[0];
@@ -42,14 +42,14 @@ fn depends_on_morrowind_master() {
 #[test]
 fn total_record_count_matches_reference() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Esm::parse(&bytes).unwrap();
+    let plugin = EsmDirectory::parse(&bytes).unwrap();
     assert_eq!(plugin.records.len(), 85);
 }
 
 #[test]
 fn per_type_counts_match_reference() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Esm::parse(&bytes).unwrap();
+    let plugin = EsmDirectory::parse(&bytes).unwrap();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
         let tag = record.tag().to_string();
@@ -87,7 +87,7 @@ fn per_type_counts_match_reference() {
 #[test]
 fn no_record_is_unknown() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Esm::parse(&bytes).unwrap();
+    let plugin = EsmDirectory::parse(&bytes).unwrap();
     let unknown: Vec<_> = plugin
         .records
         .iter()
