@@ -173,7 +173,7 @@ pub fn spawn_cells(
             }
             continue; // still loading; try again next frame
         };
-        let Some(cell) = esm.index.cell(&esm.plugin, &seed.cell) else {
+        let Some(cell) = esm.index.cell(esm.esm(), &seed.cell) else {
             eprintln!("bevy-beth: cell {:?} not found in plugin", seed.cell);
             commands
                 .entity(seed_entity)
@@ -373,7 +373,7 @@ fn spawn_terrain(
     grid_x: i32,
     grid_y: i32,
 ) -> Option<f32> {
-    let land = esm.index.land(&esm.plugin, grid_x, grid_y)?;
+    let land = esm.index.land(esm.esm(), grid_x, grid_y)?;
     let mesh = convert::land_mesh(land)?;
     let min = land
         .decode_heights()?
@@ -486,7 +486,7 @@ fn layer_texture(
         // No explicit texture: the engine's hardcoded default.
         Cow::Borrowed("_land_default.tga")
     } else {
-        match esm.index.ltex(&esm.plugin, value as u32 - 1) {
+        match esm.index.ltex(esm.esm(), value as u32 - 1) {
             Some(ltex) => ltex.texture.decode(),
             None => {
                 warn_once(warned, format!("no LTEX record with index {}", value - 1));

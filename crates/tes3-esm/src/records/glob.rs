@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, finish, l1, le_f32};
 use crate::macros::enum_field;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 enum_field! {
     /// Declared variable type (`FNAM`, stored as an ASCII type character).
@@ -14,16 +14,16 @@ enum_field! {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Glob {
-    pub id: L1String,
+pub struct Glob<'a> {
+    pub id: &'a L1Str,
     /// `None` when the `FNAM` field is absent.
     pub kind: Option<GlobalKind>,
     /// Value (all globals are stored as floats regardless of declared type).
     pub value: f32,
 }
 
-impl Glob {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Glob {
+impl<'a> Glob<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Glob<'a> {
         let mut out = Glob::default();
         for sub in subs {
             match &sub.tag.0 {

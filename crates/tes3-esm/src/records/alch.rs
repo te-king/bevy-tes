@@ -3,7 +3,7 @@
 use crate::common::{Subrecord, flags, l1, le_f32, le_u32, parse_or_default};
 use crate::shared::{Effect, effect};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Alchemy item flags (`ALDT`).
@@ -35,19 +35,19 @@ fn alchemy_data(input: &[u8]) -> IResult<&[u8], AlchemyData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Alch {
-    pub id: L1String,
-    pub model: Option<L1String>,
+pub struct Alch<'a> {
+    pub id: &'a L1Str,
+    pub model: Option<&'a L1Str>,
     /// Inventory icon name (stored in a `TEXT` subrecord for this record).
-    pub icon: Option<L1String>,
-    pub script: Option<L1String>,
-    pub name: Option<L1String>,
+    pub icon: Option<&'a L1Str>,
+    pub script: Option<&'a L1Str>,
+    pub name: Option<&'a L1Str>,
     pub data: Option<AlchemyData>,
     pub effects: Vec<Effect>,
 }
 
-impl Alch {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Alch {
+impl<'a> Alch<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Alch<'a> {
         let mut out = Alch::default();
         for sub in subs {
             match &sub.tag.0 {

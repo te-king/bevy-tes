@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, l1};
 use crate::macros::enum_field;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 enum_field! {
     /// Dialogue type (`DATA`). Shared with the INFO records that follow the topic.
@@ -16,14 +16,14 @@ enum_field! {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Dial {
-    pub id: L1String,
+pub struct Dial<'a> {
+    pub id: &'a L1Str,
     /// `None` when the (rare) `DATA` field is absent.
     pub kind: Option<DialogueKind>,
 }
 
-impl Dial {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Dial {
+impl<'a> Dial<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Dial<'a> {
         let mut out = Dial::default();
         for sub in subs {
             match &sub.tag.0 {

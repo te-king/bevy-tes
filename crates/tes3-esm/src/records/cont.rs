@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, finish, flags, l1, le_f32, parse_or_default};
 use crate::shared::{InventoryItem, inventory_item};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Container flags (`FLAG`). Bit `0x8` is undocumented but set on every vanilla
@@ -15,18 +15,18 @@ bitflags::bitflags! {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Cont {
-    pub id: L1String,
-    pub model: L1String,
-    pub name: Option<L1String>,
+pub struct Cont<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub name: Option<&'a L1Str>,
     pub weight: f32,
     pub flags: ContainerFlags,
-    pub items: Vec<InventoryItem>,
-    pub script: Option<L1String>,
+    pub items: Vec<InventoryItem<'a>>,
+    pub script: Option<&'a L1Str>,
 }
 
-impl Cont {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Cont {
+impl<'a> Cont<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Cont<'a> {
         let mut out = Cont::default();
         for sub in subs {
             match &sub.tag.0 {

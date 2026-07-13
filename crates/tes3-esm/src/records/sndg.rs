@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, enumeration, finish, l1};
 use crate::macros::enum_field;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 enum_field! {
     /// Sound generator trigger (`DATA`).
@@ -19,16 +19,16 @@ enum_field! {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Sndg {
-    pub id: L1String,
+pub struct Sndg<'a> {
+    pub id: &'a L1Str,
     pub kind: SoundGenKind,
-    pub creature: Option<L1String>,
+    pub creature: Option<&'a L1Str>,
     /// Sound ID string.
-    pub sound: Option<L1String>,
+    pub sound: Option<&'a L1Str>,
 }
 
-impl Sndg {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Sndg {
+impl<'a> Sndg<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Sndg<'a> {
         let mut out = Sndg::default();
         for sub in subs {
             match &sub.tag.0 {

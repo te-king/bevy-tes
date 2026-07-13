@@ -70,6 +70,7 @@ use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, Assets, LoadContext
 use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
+use self_cell::self_cell;
 use tes_nif::{Nif, NifError};
 use tes3_esm::{Esm, EsmError};
 
@@ -110,14 +111,56 @@ pub const TES_SOURCE: &str = "tes";
 #[derive(Resource, Clone)]
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
-/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`].
-#[derive(Asset, TypePath, Debug)]
+/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`]: the raw file bytes
+/// plus the zero-copy [`Esm`] view borrowing them (reach it via [`EsmAsset::esm`]).
+#[derive(Asset, TypePath)]
 pub struct EsmAsset {
-    /// The parsed plugin: header plus all records in file order.
-    pub plugin: Esm,
+    internal: EsmInternal,
     /// Lookups over the records (editor id → object, cell name/grid → `CELL`), built
-    /// once at load time.
+    /// once at load time. Fully owned, so it sits beside the parsed view.
     pub index: EsmIndex,
+}
+
+self_cell!(
+    struct EsmInternal {
+        owner: Vec<u8>,
+
+        #[covariant]
+        dependent: Esm,
+    }
+);
+
+impl EsmAsset {
+    /// Parse `bytes` and build the index. The bytes stay alive inside the asset; the
+    /// parsed records borrow them.
+    pub fn parse(bytes: Vec<u8>) -> Result<EsmAsset, EsmError> {
+        let internal = EsmInternal::try_new(bytes, |bytes| Esm::parse(bytes))?;
+        let index = EsmIndex::build(internal.borrow_dependent());
+        Ok(EsmAsset { internal, index })
+    }
+
+    /// Wrap an in-memory `Esm<'static>` (e.g. a synthetic test plugin built from
+    /// `&'static` literals) without a backing buffer.
+    pub fn from_static(esm: Esm<'static>) -> EsmAsset {
+        let internal = EsmInternal::new(Vec::new(), |_| esm);
+        let index = EsmIndex::build(internal.borrow_dependent());
+        EsmAsset { internal, index }
+    }
+
+    /// The parsed plugin: header plus all records in file order.
+    pub fn esm(&self) -> &Esm<'_> {
+        self.internal.borrow_dependent()
+    }
+}
+
+// Manual: self_cell's generated Debug would print the raw file bytes.
+impl std::fmt::Debug for EsmAsset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EsmAsset")
+            .field("esm", self.esm())
+            .field("index", &self.index)
+            .finish()
+    }
 }
 
 /// A parsed NIF model (`.nif`) wrapped as a Bevy [`Asset`].
@@ -158,9 +201,7 @@ impl AssetLoader for EsmLoader {
     ) -> Result<EsmAsset, EsmError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.map_err(EsmError::Io)?;
-        let plugin = Esm::parse(&bytes)?;
-        let index = EsmIndex::build(&plugin);
-        Ok(EsmAsset { plugin, index })
+        EsmAsset::parse(bytes)
     }
 
     fn extensions(&self) -> &[&str] {

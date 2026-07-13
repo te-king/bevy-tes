@@ -3,7 +3,7 @@
 use crate::common::{Subrecord, enumeration, finish, l1, le_f32, le_u32, parse_or_default};
 use crate::shared::Specialization;
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SkillData {
@@ -34,15 +34,15 @@ fn skill_data(input: &[u8]) -> IResult<&[u8], SkillData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Skil {
+pub struct Skil<'a> {
     /// Skill index (the skill's identity; names are hardcoded in the engine).
     pub index: u32,
     pub data: SkillData,
-    pub description: Option<L1String>,
+    pub description: Option<&'a L1Str>,
 }
 
-impl Skil {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Skil {
+impl<'a> Skil<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Skil<'a> {
         let mut out = Skil::default();
         for sub in subs {
             match &sub.tag.0 {

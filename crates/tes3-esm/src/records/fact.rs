@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, finish, flags, l1, le_i32, le_u32, parse_or_default};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Faction flags (`FADT`).
@@ -77,23 +77,23 @@ fn faction_data(input: &[u8]) -> IResult<&[u8], FactionData> {
 
 /// A reaction adjustment toward another faction (an `ANAM`/`INTV` pair).
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Reaction {
-    pub faction: L1String,
+pub struct Reaction<'a> {
+    pub faction: &'a L1Str,
     pub adjustment: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Fact {
-    pub id: L1String,
-    pub name: L1String,
+pub struct Fact<'a> {
+    pub id: &'a L1Str,
+    pub name: &'a L1Str,
     /// Rank names (conventionally 10 entries).
-    pub rank_names: Vec<L1String>,
+    pub rank_names: Vec<&'a L1Str>,
     pub data: FactionData,
-    pub reactions: Vec<Reaction>,
+    pub reactions: Vec<Reaction<'a>>,
 }
 
-impl Fact {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Fact {
+impl<'a> Fact<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Fact<'a> {
         let mut out = Fact::default();
         for sub in subs {
             match &sub.tag.0 {

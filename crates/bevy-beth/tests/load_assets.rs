@@ -36,8 +36,8 @@ fn loads_morrowind_esm_through_asset_server() {
 
     let assets = app.world().resource::<Assets<EsmAsset>>();
     let esm = assets.get(&handle).expect("asset present once loaded");
-    assert_eq!(esm.plugin.header.version, 1.2);
-    assert_eq!(esm.plugin.records.len(), 48_296);
+    assert_eq!(esm.esm().header.version, 1.2);
+    assert_eq!(esm.esm().records.len(), 48_296);
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn loads_morrowind_esm_through_the_tes_source() {
 
     let assets = app.world().resource::<Assets<EsmAsset>>();
     let esm = assets.get(&handle).expect("asset present once loaded");
-    assert_eq!(esm.plugin.records.len(), 48_296);
+    assert_eq!(esm.esm().records.len(), 48_296);
 }
 
 #[test]

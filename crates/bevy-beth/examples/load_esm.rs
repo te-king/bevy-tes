@@ -121,7 +121,7 @@ fn main() -> ExitCode {
 }
 
 fn print_summary(path: &str, asset: &EsmAsset) {
-    let h = &asset.plugin.header;
+    let h = &asset.esm().header;
     println!("Loaded {path} via Bevy AssetServer");
     println!("  version:          {}", h.version);
     println!(
@@ -137,9 +137,9 @@ fn print_summary(path: &str, asset: &EsmAsset) {
         }
     }
 
-    println!("  parsed records:   {}", asset.plugin.records.len());
+    println!("  parsed records:   {}", asset.esm().records.len());
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for record in &asset.plugin.records {
+    for record in &asset.esm().records {
         *counts.entry(record.tag().to_string()).or_default() += 1;
     }
     let mut by_count: Vec<_> = counts.iter().collect();

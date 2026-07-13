@@ -1,22 +1,22 @@
 //! `DOOR` — a door.
 
 use crate::common::{Subrecord, l1};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Door {
-    pub id: L1String,
-    pub model: L1String,
-    pub name: Option<L1String>,
-    pub script: Option<L1String>,
+pub struct Door<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub name: Option<&'a L1Str>,
+    pub script: Option<&'a L1Str>,
     /// Sound played when opening.
-    pub open_sound: Option<L1String>,
+    pub open_sound: Option<&'a L1Str>,
     /// Sound played when closing.
-    pub close_sound: Option<L1String>,
+    pub close_sound: Option<&'a L1Str>,
 }
 
-impl Door {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Door {
+impl<'a> Door<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Door<'a> {
         let mut out = Door::default();
         for sub in subs {
             match &sub.tag.0 {

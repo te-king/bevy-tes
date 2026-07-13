@@ -1,18 +1,18 @@
 //! `SSCR` — a start script (a feature added by Tribunal, also used by Bloodmoon).
 
 use crate::common::{Subrecord, l1};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Sscr {
+pub struct Sscr<'a> {
     /// Unknown data — a series of ASCII digits.
-    pub data: L1String,
+    pub data: &'a L1Str,
     /// Script name (technically optional).
-    pub name: Option<L1String>,
+    pub name: Option<&'a L1Str>,
 }
 
-impl Sscr {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Sscr {
+impl<'a> Sscr<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Sscr<'a> {
         let mut out = Sscr::default();
         for sub in subs {
             match &sub.tag.0 {

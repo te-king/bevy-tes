@@ -1,7 +1,7 @@
 //! `LEVC` — a leveled creature list.
 
 use crate::common::{Subrecord, finish, flags, l1, le_u16};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Leveled creature list flags (`DATA`).
@@ -14,21 +14,21 @@ bitflags::bitflags! {
 
 /// One entry in a leveled creature list.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct LeveledCreature {
-    pub creature: L1String,
+pub struct LeveledCreature<'a> {
+    pub creature: &'a L1Str,
     pub level: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Levc {
-    pub id: L1String,
+pub struct Levc<'a> {
+    pub id: &'a L1Str,
     pub flags: LeveledCreatureFlags,
     pub chance_none: u8,
-    pub creatures: Vec<LeveledCreature>,
+    pub creatures: Vec<LeveledCreature<'a>>,
 }
 
-impl Levc {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Levc {
+impl<'a> Levc<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Levc<'a> {
         let mut out = Levc::default();
         for sub in subs {
             match &sub.tag.0 {

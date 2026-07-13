@@ -1,21 +1,21 @@
 //! `BSGN` — a birthsign.
 
 use crate::common::{Subrecord, l1};
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Bsgn {
-    pub id: L1String,
-    pub name: Option<L1String>,
+pub struct Bsgn<'a> {
+    pub id: &'a L1Str,
+    pub name: Option<&'a L1Str>,
     /// Spell/ability IDs granted by the birthsign.
-    pub spells: Vec<L1String>,
+    pub spells: Vec<&'a L1Str>,
     /// Texture file name.
-    pub texture: Option<L1String>,
-    pub description: Option<L1String>,
+    pub texture: Option<&'a L1Str>,
+    pub description: Option<&'a L1Str>,
 }
 
-impl Bsgn {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Bsgn {
+impl<'a> Bsgn<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Bsgn<'a> {
         let mut out = Bsgn::default();
         for sub in subs {
             match &sub.tag.0 {

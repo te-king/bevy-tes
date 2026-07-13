@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, l1, le_f32, le_i32, le_u32, parse_or_default};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct IngredientData {
@@ -43,17 +43,17 @@ fn ingredient_data(input: &[u8]) -> IResult<&[u8], IngredientData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Ingr {
-    pub id: L1String,
-    pub model: L1String,
-    pub name: Option<L1String>,
+pub struct Ingr<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub name: Option<&'a L1Str>,
     pub data: IngredientData,
-    pub script: Option<L1String>,
-    pub icon: Option<L1String>,
+    pub script: Option<&'a L1Str>,
+    pub icon: Option<&'a L1Str>,
 }
 
-impl Ingr {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Ingr {
+impl<'a> Ingr<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ingr<'a> {
         let mut out = Ingr::default();
         for sub in subs {
             match &sub.tag.0 {

@@ -4,7 +4,7 @@ use crate::common::{Subrecord, enumeration, flags, l1, le_u32, parse_or_default}
 use crate::macros::enum_field;
 use crate::shared::{Effect, effect};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Enchantment flags (`ENDT`).
@@ -49,14 +49,14 @@ fn enchant_data(input: &[u8]) -> IResult<&[u8], EnchantData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Ench {
-    pub id: L1String,
+pub struct Ench<'a> {
+    pub id: &'a L1Str,
     pub data: EnchantData,
     pub effects: Vec<Effect>,
 }
 
-impl Ench {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Ench {
+impl<'a> Ench<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ench<'a> {
         let mut out = Ench::default();
         for sub in subs {
             match &sub.tag.0 {

@@ -2,7 +2,7 @@
 
 use crate::common::{Subrecord, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Race flags (`RADT`).
@@ -67,17 +67,17 @@ fn race_data(input: &[u8]) -> IResult<&[u8], RaceData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Race {
-    pub id: L1String,
-    pub name: Option<L1String>,
+pub struct Race<'a> {
+    pub id: &'a L1Str,
+    pub name: Option<&'a L1Str>,
     pub data: RaceData,
     /// Special power / ability spell IDs.
-    pub powers: Vec<L1String>,
-    pub description: Option<L1String>,
+    pub powers: Vec<&'a L1Str>,
+    pub description: Option<&'a L1Str>,
 }
 
-impl Race {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Race {
+impl<'a> Race<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Race<'a> {
         let mut out = Race::default();
         for sub in subs {
             match &sub.tag.0 {

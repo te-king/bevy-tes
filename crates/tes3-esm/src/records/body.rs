@@ -3,7 +3,7 @@
 use crate::common::{Subrecord, enumeration, flags, l1, le_u8, parse_or_default};
 use crate::macros::enum_field;
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Body part flags (`BYDT`).
@@ -69,16 +69,16 @@ fn body_data(input: &[u8]) -> IResult<&[u8], BodyData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Body {
-    pub id: L1String,
-    pub model: L1String,
+pub struct Body<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
     /// Race this body part belongs to.
-    pub race: L1String,
+    pub race: &'a L1Str,
     pub data: BodyData,
 }
 
-impl Body {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Body {
+impl<'a> Body<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Body<'a> {
         let mut out = Body::default();
         for sub in subs {
             match &sub.tag.0 {

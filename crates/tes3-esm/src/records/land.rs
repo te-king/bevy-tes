@@ -32,24 +32,24 @@ bitflags::bitflags! {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Land {
+pub struct Land<'a> {
     pub grid_x: i32,
     pub grid_y: i32,
     /// Which of the arrays below are populated.
     pub data_types: LandFlags,
     /// 65×65×3 vertex normals (`VNML`), as raw signed bytes.
-    pub normals: Option<Vec<u8>>,
+    pub normals: Option<&'a [u8]>,
     /// Per-cell height offset from `VHGT`.
     pub height_offset: Option<f32>,
     /// 65×65 delta-encoded vertex heights from `VHGT`, as raw signed bytes.
-    pub heights: Option<Vec<u8>>,
+    pub heights: Option<&'a [u8]>,
     /// 9×9 world-map heights (`WNAM`).
-    pub world_map_heights: Option<Vec<u8>>,
+    pub world_map_heights: Option<&'a [u8]>,
     /// 65×65×3 vertex colors (`VCLR`).
-    pub colors: Option<Vec<u8>>,
+    pub colors: Option<&'a [u8]>,
     /// Raw 16×16 texture-index grid bytes (`VTEX`), in the file's swizzled block order;
     /// decode via [`Land::decode_textures`] (or [`Land::texture_indices`] for raw order).
-    pub texture_data: Option<Vec<u8>>,
+    pub texture_data: Option<&'a [u8]>,
 }
 
 fn coords(input: &[u8]) -> IResult<&[u8], (i32, i32)> {
@@ -66,8 +66,8 @@ fn vhgt(input: &[u8]) -> IResult<&[u8], (f32, &[u8])> {
     Ok((&rest[heights_end..], (offset, &rest[..heights_end])))
 }
 
-impl Land {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Land {
+impl<'a> Land<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Land<'a> {
         let mut out = Land::default();
         for sub in subs {
             match &sub.tag.0 {
@@ -78,16 +78,16 @@ impl Land {
                     }
                 }
                 b"DATA" => out.data_types = finish(flags(sub.data)).unwrap_or_default(),
-                b"VNML" => out.normals = Some(sub.data.to_vec()),
+                b"VNML" => out.normals = Some(sub.data),
                 b"VHGT" => {
                     if let Some((offset, heights)) = finish(vhgt(sub.data)) {
                         out.height_offset = Some(offset);
-                        out.heights = Some(heights.to_vec());
+                        out.heights = Some(heights);
                     }
                 }
-                b"WNAM" => out.world_map_heights = Some(sub.data.to_vec()),
-                b"VCLR" => out.colors = Some(sub.data.to_vec()),
-                b"VTEX" => out.texture_data = Some(sub.data.to_vec()),
+                b"WNAM" => out.world_map_heights = Some(sub.data),
+                b"VCLR" => out.colors = Some(sub.data),
+                b"VTEX" => out.texture_data = Some(sub.data),
                 _ => {}
             }
         }
@@ -98,7 +98,6 @@ impl Land {
     /// guaranteed to be 2-byte aligned, so they are read rather than transmuted).
     pub fn texture_indices(&self) -> impl Iterator<Item = u16> + '_ {
         self.texture_data
-            .as_deref()
             .unwrap_or(&[])
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -114,7 +113,7 @@ impl Land {
     ///
     /// `None` when `VTEX` is absent or not exactly 16×16 `u16`s.
     pub fn decode_textures(&self) -> Option<Vec<u16>> {
-        if self.texture_data.as_deref()?.len() != VTEX_GRID * VTEX_GRID * 2 {
+        if self.texture_data?.len() != VTEX_GRID * VTEX_GRID * 2 {
             return None;
         }
         let mut out = vec![0u16; VTEX_GRID * VTEX_GRID];
@@ -138,7 +137,7 @@ impl Land {
     ///
     /// `None` when `VHGT` is absent or truncated.
     pub fn decode_heights(&self) -> Option<Vec<f32>> {
-        let deltas = self.heights.as_deref()?;
+        let deltas = self.heights?;
         if deltas.len() != LAND_GRID * LAND_GRID {
             return None;
         }
@@ -162,7 +161,7 @@ impl Land {
     ///
     /// `None` when `VNML` is absent or truncated.
     pub fn decode_normals(&self) -> Option<Vec<[f32; 3]>> {
-        let bytes = self.normals.as_deref()?;
+        let bytes = self.normals?;
         if bytes.len() != LAND_GRID * LAND_GRID * 3 {
             return None;
         }
@@ -188,7 +187,7 @@ impl Land {
     ///
     /// `None` when `VCLR` is absent or truncated.
     pub fn decode_colors(&self) -> Option<Vec<[u8; 3]>> {
-        let bytes = self.colors.as_deref()?;
+        let bytes = self.colors?;
         if bytes.len() != LAND_GRID * LAND_GRID * 3 {
             return None;
         }
@@ -200,7 +199,7 @@ impl Land {
 mod tests {
     use super::*;
 
-    fn land_with_heights(offset: f32, deltas: Vec<u8>) -> Land {
+    fn land_with_heights(offset: f32, deltas: &[u8]) -> Land<'_> {
         Land {
             height_offset: Some(offset),
             heights: Some(deltas),
@@ -215,7 +214,7 @@ mod tests {
         deltas[1] = 2;
         deltas[65] = 0xFF; // -1
         deltas[66] = 3;
-        let h = land_with_heights(10.0, deltas).decode_heights().unwrap();
+        let h = land_with_heights(10.0, &deltas).decode_heights().unwrap();
         assert_eq!(h.len(), 4225);
         // Row 0's first byte deltas from the offset: (10 + 1) * 8.
         assert_eq!(h[0], 88.0);
@@ -230,12 +229,8 @@ mod tests {
 
     #[test]
     fn decode_heights_rejects_truncated_or_offsetless_data() {
-        assert!(
-            land_with_heights(0.0, vec![0; 100])
-                .decode_heights()
-                .is_none()
-        );
-        let mut land = land_with_heights(0.0, vec![0; LAND_GRID * LAND_GRID]);
+        assert!(land_with_heights(0.0, &[0; 100]).decode_heights().is_none());
+        let mut land = land_with_heights(0.0, &[0; LAND_GRID * LAND_GRID]);
         land.height_offset = None;
         assert!(land.decode_heights().is_none());
         assert!(Land::default().decode_heights().is_none());
@@ -249,7 +244,7 @@ mod tests {
         bytes[4] = 127;
         // vertex 2 stays (0, 0, 0) → degenerate, falls back to +Z
         let land = Land {
-            normals: Some(bytes),
+            normals: Some(&bytes),
             ..Land::default()
         };
         let normals = land.decode_normals().unwrap();
@@ -260,7 +255,7 @@ mod tests {
         assert_eq!(normals[2], [0.0, 0.0, 1.0]);
 
         let truncated = Land {
-            normals: Some(vec![0; 10]),
+            normals: Some(&[0; 10]),
             ..Land::default()
         };
         assert!(truncated.decode_normals().is_none());
@@ -272,7 +267,7 @@ mod tests {
         // "which stored slot landed here", pinning the block layout exactly.
         let bytes: Vec<u8> = (0..256u16).flat_map(u16::to_le_bytes).collect();
         let land = Land {
-            texture_data: Some(bytes),
+            texture_data: Some(&bytes),
             ..Land::default()
         };
         let grid = land.decode_textures().unwrap();
@@ -293,7 +288,7 @@ mod tests {
     fn decode_textures_rejects_absent_or_truncated_data() {
         assert!(Land::default().decode_textures().is_none());
         let truncated = Land {
-            texture_data: Some(vec![0; 100]),
+            texture_data: Some(&[0; 100]),
             ..Land::default()
         };
         assert!(truncated.decode_textures().is_none());
@@ -306,7 +301,7 @@ mod tests {
         bytes[1] = 2;
         bytes[2] = 3;
         let land = Land {
-            colors: Some(bytes),
+            colors: Some(&bytes),
             ..Land::default()
         };
         let colors = land.decode_colors().unwrap();
@@ -315,7 +310,7 @@ mod tests {
         assert_eq!(colors[4224], [255, 255, 255]);
 
         let truncated = Land {
-            colors: Some(vec![0; 10]),
+            colors: Some(&[0; 10]),
             ..Land::default()
         };
         assert!(truncated.decode_colors().is_none());

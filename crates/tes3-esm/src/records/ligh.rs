@@ -2,7 +2,7 @@
 
 use crate::common::{Color, Subrecord, color, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 bitflags::bitflags! {
     /// Light behavior flags (`LHDT`).
@@ -52,18 +52,18 @@ fn light_data(input: &[u8]) -> IResult<&[u8], LightData> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Ligh {
-    pub id: L1String,
-    pub model: Option<L1String>,
-    pub name: Option<L1String>,
-    pub icon: Option<L1String>,
+pub struct Ligh<'a> {
+    pub id: &'a L1Str,
+    pub model: Option<&'a L1Str>,
+    pub name: Option<&'a L1Str>,
+    pub icon: Option<&'a L1Str>,
     pub data: LightData,
-    pub sound: Option<L1String>,
-    pub script: Option<L1String>,
+    pub sound: Option<&'a L1Str>,
+    pub script: Option<&'a L1Str>,
 }
 
-impl Ligh {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Ligh {
+impl<'a> Ligh<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ligh<'a> {
         let mut out = Ligh::default();
         for sub in subs {
             match &sub.tag.0 {

@@ -9,7 +9,7 @@ use crate::shared::{
     ai_follow, ai_travel, ai_wander, inventory_item, travel_destination,
 };
 use nom::IResult;
-use tes_core::L1String;
+use tes_core::L1Str;
 
 enum_field! {
     /// Creature type (`NPDT`).
@@ -102,24 +102,24 @@ bitflags::bitflags! {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Crea {
-    pub id: L1String,
-    pub model: L1String,
-    pub sound_gen: Option<L1String>,
-    pub name: Option<L1String>,
-    pub script: Option<L1String>,
+pub struct Crea<'a> {
+    pub id: &'a L1Str,
+    pub model: &'a L1Str,
+    pub sound_gen: Option<&'a L1Str>,
+    pub name: Option<&'a L1Str>,
+    pub script: Option<&'a L1Str>,
     pub data: CreatureData,
     pub flags: CreatureFlags,
     pub scale: Option<f32>,
-    pub inventory: Vec<InventoryItem>,
-    pub spells: Vec<L1String>,
+    pub inventory: Vec<InventoryItem<'a>>,
+    pub spells: Vec<&'a L1Str>,
     pub ai_data: Option<AiData>,
-    pub destinations: Vec<TravelDestination>,
-    pub ai_packages: Vec<AiPackage>,
+    pub destinations: Vec<TravelDestination<'a>>,
+    pub ai_packages: Vec<AiPackage<'a>>,
 }
 
-impl Crea {
-    pub fn from_subrecords<'a>(subs: impl Iterator<Item = Subrecord<'a>>) -> Crea {
+impl<'a> Crea<'a> {
+    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Crea<'a> {
         let mut out = Crea::default();
         for sub in subs {
             match &sub.tag.0 {
@@ -162,14 +162,14 @@ impl Crea {
 }
 
 /// Push a parsed AI package if it decoded successfully.
-fn push_pkg(packages: &mut Vec<AiPackage>, pkg: Option<AiPackage>) {
+fn push_pkg<'a>(packages: &mut Vec<AiPackage<'a>>, pkg: Option<AiPackage<'a>>) {
     if let Some(pkg) = pkg {
         packages.push(pkg);
     }
 }
 
 /// Attach a trailing `CNDT` cell name to the most recent Escort/Follow package.
-fn attach_cell(packages: &mut [AiPackage], cell: L1String) {
+fn attach_cell<'a>(packages: &mut [AiPackage<'a>], cell: &'a L1Str) {
     if let Some(AiPackage::Escort { cell: c, .. } | AiPackage::Follow { cell: c, .. }) =
         packages.last_mut()
     {
