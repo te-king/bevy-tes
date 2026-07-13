@@ -1,7 +1,8 @@
 //! `APPA` — an alchemy apparatus.
 
 use crate::common::{Subrecord, enumeration, l1, le_f32, le_u32, parse_or_default};
-use crate::macros::{enum_field, parse_struct};
+use crate::macros::enum_field;
+use nom::IResult;
 use tes_core::L1String;
 
 enum_field! {
@@ -22,13 +23,20 @@ pub struct ApparatusData {
     pub value: u32,
 }
 
-parse_struct! {
-    fn apparatus_data -> ApparatusData {
-        kind: enumeration,
-        quality: le_f32,
-        weight: le_f32,
-        value: le_u32,
-    }
+fn apparatus_data(input: &[u8]) -> IResult<&[u8], ApparatusData> {
+    let (input, kind) = enumeration(input)?;
+    let (input, quality) = le_f32(input)?;
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    Ok((
+        input,
+        ApparatusData {
+            kind,
+            quality,
+            weight,
+            value,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

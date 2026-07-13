@@ -1,9 +1,8 @@
 //! The crate's code-generation macros, gathered in one place.
 //!
 //! Each macro turns a single declarative table into the repetitive impls the format
-//! demands: [`records!`] builds the `Record` enum and its tag dispatch, [`parse_struct!`]
-//! builds fixed-layout subrecord parsers, and [`enum_field!`] builds typed enums for
-//! integer discriminant fields.
+//! demands: [`records!`] builds the `Record` enum and its tag dispatch, and
+//! [`enum_field!`] builds typed enums for integer discriminant fields.
 
 /// Generate the [`Record`](crate::Record) enum and its tag dispatch from one
 /// `Variant(Type) = b"TAG"` table, so each record type is listed exactly once instead of
@@ -52,37 +51,6 @@ macro_rules! records {
     };
 }
 pub(crate) use records;
-
-/// Generate a nom parser for a fixed-layout subrecord struct from a single
-/// `field: parser` table, so parse order and struct construction cannot drift apart
-/// (the struct definition stays hand-written — it carries the field docs):
-///
-/// ```ignore
-/// parse_struct! {
-///     fn misc_data -> MiscData {
-///         weight: le_f32,
-///         value: le_u32,
-///         flags: le_u32,
-///     }
-/// }
-/// ```
-///
-/// Parsers are any `Fn(&[u8]) -> IResult<&[u8], T>` expression (`le_u32`,
-/// `fixed_l1str(32)`, a local helper, …). The `fn` takes an optional visibility
-/// (`pub fn` for the parsers `shared` exports). Layouts with padding to skip, computed
-/// fields or loops don't fit and stay hand-written.
-macro_rules! parse_struct {
-    ($(#[$meta:meta])* $vis:vis fn $name:ident -> $ty:ident {
-        $( $field:ident : $parser:expr ),+ $(,)?
-    }) => {
-        $(#[$meta])*
-        $vis fn $name(input: &[u8]) -> nom::IResult<&[u8], $ty> {
-            $( let (input, $field) = ($parser)(input)?; )+
-            Ok((input, $ty { $( $field ),+ }))
-        }
-    };
-}
-pub(crate) use parse_struct;
 
 /// Generate a typed enum for an integer discriminant field from one `Variant = value`
 /// table: `From` conversions in both directions (unmodeled values round-trip verbatim

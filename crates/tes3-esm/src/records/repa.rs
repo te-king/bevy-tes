@@ -1,7 +1,7 @@
 //! `REPA` — a repair item.
 
 use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
-use crate::macros::parse_struct;
+use nom::IResult;
 use tes_core::L1String;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -12,13 +12,20 @@ pub struct RepairData {
     pub quality: f32,
 }
 
-parse_struct! {
-    fn repair_data -> RepairData {
-        weight: le_f32,
-        value: le_u32,
-        uses: le_u32,
-        quality: le_f32,
-    }
+fn repair_data(input: &[u8]) -> IResult<&[u8], RepairData> {
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, uses) = le_u32(input)?;
+    let (input, quality) = le_f32(input)?;
+    Ok((
+        input,
+        RepairData {
+            weight,
+            value,
+            uses,
+            quality,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

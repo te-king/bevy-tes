@@ -1,7 +1,7 @@
 //! `BOOK` — a book or scroll.
 
 use crate::common::{Subrecord, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
-use crate::macros::parse_struct;
+use nom::IResult;
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -22,14 +22,22 @@ pub struct BookData {
     pub enchant_points: u32,
 }
 
-parse_struct! {
-    fn book_data -> BookData {
-        weight: le_f32,
-        value: le_u32,
-        flags: flags,
-        skill: le_i32,
-        enchant_points: le_u32,
-    }
+fn book_data(input: &[u8]) -> IResult<&[u8], BookData> {
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
+    let (input, skill) = le_i32(input)?;
+    let (input, enchant_points) = le_u32(input)?;
+    Ok((
+        input,
+        BookData {
+            weight,
+            value,
+            flags,
+            skill,
+            enchant_points,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

@@ -1,8 +1,9 @@
 //! `ARMO` — armor.
 
 use crate::common::{Subrecord, enumeration, l1, le_f32, le_u32, parse_or_default};
-use crate::macros::{enum_field, parse_struct};
+use crate::macros::enum_field;
 use crate::shared::BipedItem;
+use nom::IResult;
 use tes_core::L1String;
 
 enum_field! {
@@ -32,15 +33,24 @@ pub struct ArmorData {
     pub armor_rating: u32,
 }
 
-parse_struct! {
-    fn armor_data -> ArmorData {
-        kind: enumeration,
-        weight: le_f32,
-        value: le_u32,
-        health: le_u32,
-        enchant_points: le_u32,
-        armor_rating: le_u32,
-    }
+fn armor_data(input: &[u8]) -> IResult<&[u8], ArmorData> {
+    let (input, kind) = enumeration(input)?;
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, health) = le_u32(input)?;
+    let (input, enchant_points) = le_u32(input)?;
+    let (input, armor_rating) = le_u32(input)?;
+    Ok((
+        input,
+        ArmorData {
+            kind,
+            weight,
+            value,
+            health,
+            enchant_points,
+            armor_rating,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

@@ -3,7 +3,8 @@
 use crate::common::{
     Subrecord, enumeration, flags, l1, le_f32, le_u8, le_u16, le_u32, parse_or_default,
 };
-use crate::macros::{enum_field, parse_struct};
+use crate::macros::enum_field;
+use nom::IResult;
 use tes_core::L1String;
 
 enum_field! {
@@ -53,23 +54,40 @@ pub struct WeaponData {
     pub flags: WeaponFlags,
 }
 
-parse_struct! {
-    fn weapon_data -> WeaponData {
-        weight: le_f32,
-        value: le_u32,
-        kind: enumeration,
-        health: le_u16,
-        speed: le_f32,
-        reach: le_f32,
-        enchant_points: le_u16,
-        chop_min: le_u8,
-        chop_max: le_u8,
-        slash_min: le_u8,
-        slash_max: le_u8,
-        thrust_min: le_u8,
-        thrust_max: le_u8,
-        flags: flags,
-    }
+fn weapon_data(input: &[u8]) -> IResult<&[u8], WeaponData> {
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, kind) = enumeration(input)?;
+    let (input, health) = le_u16(input)?;
+    let (input, speed) = le_f32(input)?;
+    let (input, reach) = le_f32(input)?;
+    let (input, enchant_points) = le_u16(input)?;
+    let (input, chop_min) = le_u8(input)?;
+    let (input, chop_max) = le_u8(input)?;
+    let (input, slash_min) = le_u8(input)?;
+    let (input, slash_max) = le_u8(input)?;
+    let (input, thrust_min) = le_u8(input)?;
+    let (input, thrust_max) = le_u8(input)?;
+    let (input, flags) = flags(input)?;
+    Ok((
+        input,
+        WeaponData {
+            weight,
+            value,
+            kind,
+            health,
+            speed,
+            reach,
+            enchant_points,
+            chop_min,
+            chop_max,
+            slash_min,
+            slash_max,
+            thrust_min,
+            thrust_max,
+            flags,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 
 use tes3_esm::records::tes3::HeaderFlags;
-use tes3_esm::{Plugin, Record};
+use tes3_esm::{Esm, Record};
 
-/// Read the file into an owned buffer to parse. The parsed `Plugin` owns its data, so it
+/// Read the file into an owned buffer to parse. The parsed `Esm` owns its data, so it
 /// no longer depends on this buffer once parsing returns. The file is gitignored,
 /// locally supplied game data; `None` means skip the test.
 fn load_bytes() -> Option<Vec<u8>> {
@@ -19,7 +19,7 @@ fn load_bytes() -> Option<Vec<u8>> {
 #[test]
 fn header_is_decoded() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     assert_eq!(plugin.header.version, 1.2);
     assert!(
         plugin.header.flags.contains(HeaderFlags::MASTER),
@@ -33,21 +33,21 @@ fn header_is_decoded() {
 #[test]
 fn first_record_is_the_header() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     assert!(matches!(plugin.records.first(), Some(Record::Tes3(_))));
 }
 
 #[test]
 fn total_record_count_matches_reference() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     assert_eq!(plugin.records.len(), 48_296);
 }
 
 #[test]
 fn per_type_counts_match_reference() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
         let tag = record.tag().to_string();
@@ -88,7 +88,7 @@ fn per_type_counts_match_reference() {
 #[test]
 fn no_record_is_unknown() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     let unknown = plugin
         .records
         .iter()
@@ -100,7 +100,7 @@ fn no_record_is_unknown() {
 #[test]
 fn records_decode_their_fields() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
 
     // A GMST with a known string value.
     let month = plugin.records.iter().find_map(|r| match r {
@@ -133,7 +133,7 @@ fn records_decode_their_fields() {
 fn strings_are_stored_undecoded_and_decode_lazily() {
     use std::borrow::Cow;
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     // The L1String stores the raw Windows-1252 bytes as-is; the parser never transcoded
     // them.
     assert_eq!(plugin.header.company.as_bytes(), b"Bethesda Softworks");
@@ -151,7 +151,7 @@ fn land_heights_decode_and_tile_seamlessly() {
     use tes3_esm::records::land::{HEIGHT_SCALE, Land, LandFlags};
 
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
 
     let lands: HashMap<(i32, i32), &Land> = plugin
         .records
@@ -235,7 +235,7 @@ fn parse_timing() {
     let mut record_count = 0;
     for _ in 0..ITERATIONS {
         let start = Instant::now();
-        let plugin = Plugin::parse(&bytes).expect("parse should succeed");
+        let plugin = Esm::parse(&bytes).expect("parse should succeed");
         let elapsed = start.elapsed();
         record_count = plugin.records.len();
         total += elapsed;

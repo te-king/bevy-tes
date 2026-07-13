@@ -71,7 +71,7 @@ use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
 use tes_nif::{Nif, NifError};
-use tes3_esm::{EsmError, Plugin as TesPlugin};
+use tes3_esm::{Esm, EsmError};
 
 pub mod index;
 pub mod vfs;
@@ -114,7 +114,7 @@ pub struct TesVfsHandle(pub Arc<TesVfs>);
 #[derive(Asset, TypePath, Debug)]
 pub struct EsmAsset {
     /// The parsed plugin: header plus all records in file order.
-    pub plugin: TesPlugin,
+    pub plugin: Esm,
     /// Lookups over the records (editor id → object, cell name/grid → `CELL`), built
     /// once at load time.
     pub index: EsmIndex,
@@ -158,7 +158,7 @@ impl AssetLoader for EsmLoader {
     ) -> Result<EsmAsset, EsmError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.map_err(EsmError::Io)?;
-        let plugin = TesPlugin::parse(&bytes)?;
+        let plugin = Esm::parse(&bytes)?;
         let index = EsmIndex::build(&plugin);
         Ok(EsmAsset { plugin, index })
     }

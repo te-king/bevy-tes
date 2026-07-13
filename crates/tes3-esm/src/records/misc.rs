@@ -1,7 +1,7 @@
 //! `MISC` — a miscellaneous item.
 
 use crate::common::{Subrecord, flags, l1, le_f32, le_u32, parse_or_default};
-use crate::macros::parse_struct;
+use nom::IResult;
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -19,12 +19,18 @@ pub struct MiscData {
     pub flags: MiscFlags,
 }
 
-parse_struct! {
-    fn misc_data -> MiscData {
-        weight: le_f32,
-        value: le_u32,
-        flags: flags,
-    }
+fn misc_data(input: &[u8]) -> IResult<&[u8], MiscData> {
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, flags) = flags(input)?;
+    Ok((
+        input,
+        MiscData {
+            weight,
+            value,
+            flags,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

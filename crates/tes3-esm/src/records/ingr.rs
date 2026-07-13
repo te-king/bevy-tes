@@ -1,7 +1,6 @@
 //! `INGR` — an alchemy ingredient.
 
 use crate::common::{Subrecord, l1, le_f32, le_i32, le_u32, parse_or_default};
-use crate::macros::parse_struct;
 use nom::IResult;
 use tes_core::L1String;
 
@@ -25,14 +24,22 @@ fn read4(input: &[u8]) -> IResult<&[u8], [i32; 4]> {
     Ok((input, [a, b, c, d]))
 }
 
-parse_struct! {
-    fn ingredient_data -> IngredientData {
-        weight: le_f32,
-        value: le_u32,
-        effects: read4,
-        skills: read4,
-        attributes: read4,
-    }
+fn ingredient_data(input: &[u8]) -> IResult<&[u8], IngredientData> {
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u32(input)?;
+    let (input, effects) = read4(input)?;
+    let (input, skills) = read4(input)?;
+    let (input, attributes) = read4(input)?;
+    Ok((
+        input,
+        IngredientData {
+            weight,
+            value,
+            effects,
+            skills,
+            attributes,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

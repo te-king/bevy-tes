@@ -1,7 +1,6 @@
 //! `REGN` — a world region.
 
 use crate::common::{Color, Subrecord, color, finish, fixed_l1str, l1, le_u8};
-use crate::macros::parse_struct;
 use nom::IResult;
 use tes_core::L1String;
 
@@ -54,11 +53,10 @@ pub struct SoundChance {
     pub chance: u8,
 }
 
-parse_struct! {
-    fn sound_chance -> SoundChance {
-        sound: fixed_l1str(32),
-        chance: le_u8,
-    }
+fn sound_chance(input: &[u8]) -> IResult<&[u8], SoundChance> {
+    let (input, sound) = fixed_l1str(32)(input)?;
+    let (input, chance) = le_u8(input)?;
+    Ok((input, SoundChance { sound, chance }))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

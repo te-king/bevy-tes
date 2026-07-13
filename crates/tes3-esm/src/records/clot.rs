@@ -1,8 +1,9 @@
 //! `CLOT` — an item of clothing.
 
 use crate::common::{Subrecord, enumeration, l1, le_f32, le_u16, parse_or_default};
-use crate::macros::{enum_field, parse_struct};
+use crate::macros::enum_field;
 use crate::shared::BipedItem;
+use nom::IResult;
 use tes_core::L1String;
 
 enum_field! {
@@ -29,13 +30,20 @@ pub struct ClothingData {
     pub enchant_points: u16,
 }
 
-parse_struct! {
-    fn clothing_data -> ClothingData {
-        kind: enumeration,
-        weight: le_f32,
-        value: le_u16,
-        enchant_points: le_u16,
-    }
+fn clothing_data(input: &[u8]) -> IResult<&[u8], ClothingData> {
+    let (input, kind) = enumeration(input)?;
+    let (input, weight) = le_f32(input)?;
+    let (input, value) = le_u16(input)?;
+    let (input, enchant_points) = le_u16(input)?;
+    Ok((
+        input,
+        ClothingData {
+            kind,
+            weight,
+            value,
+            enchant_points,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

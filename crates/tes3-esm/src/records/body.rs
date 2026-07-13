@@ -1,7 +1,8 @@
 //! `BODY` — a body part.
 
 use crate::common::{Subrecord, enumeration, flags, l1, le_u8, parse_or_default};
-use crate::macros::{enum_field, parse_struct};
+use crate::macros::enum_field;
+use nom::IResult;
 use tes_core::L1String;
 
 bitflags::bitflags! {
@@ -51,13 +52,20 @@ pub struct BodyData {
     pub part_type: BodyPartKind,
 }
 
-parse_struct! {
-    fn body_data -> BodyData {
-        part: enumeration,
-        vampire: le_u8,
-        flags: flags,
-        part_type: enumeration,
-    }
+fn body_data(input: &[u8]) -> IResult<&[u8], BodyData> {
+    let (input, part) = enumeration(input)?;
+    let (input, vampire) = le_u8(input)?;
+    let (input, flags) = flags(input)?;
+    let (input, part_type) = enumeration(input)?;
+    Ok((
+        input,
+        BodyData {
+            part,
+            vampire,
+            flags,
+            part_type,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

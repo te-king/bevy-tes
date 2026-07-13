@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use tes3_esm::records::tes3::HeaderFlags;
-use tes3_esm::{Plugin, Record};
+use tes3_esm::{Esm, Record};
 
 /// The file is gitignored, locally supplied game data; `None` means skip the test.
 fn load_bytes() -> Option<Vec<u8>> {
@@ -17,7 +17,7 @@ fn load_bytes() -> Option<Vec<u8>> {
 #[test]
 fn header_is_v13_master() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     // Bloodmoon bumps the format version to 1.3 (Morrowind.esm is 1.2).
     assert_eq!(plugin.header.version, 1.3);
     assert!(
@@ -30,14 +30,14 @@ fn header_is_v13_master() {
 #[test]
 fn total_record_count_matches_reference() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     assert_eq!(plugin.records.len(), 10_776);
 }
 
 #[test]
 fn per_type_counts_match_reference() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for record in &plugin.records {
         let tag = record.tag().to_string();
@@ -74,7 +74,7 @@ fn per_type_counts_match_reference() {
 #[test]
 fn no_record_is_unknown() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     let unknown: Vec<_> = plugin
         .records
         .iter()
@@ -89,7 +89,7 @@ fn no_record_is_unknown() {
 #[test]
 fn sscr_is_decoded() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     let sscr = plugin
         .records
         .iter()
@@ -106,7 +106,7 @@ fn sscr_is_decoded() {
 #[test]
 fn v13_region_weather_has_snow_and_blizzard() {
     let Some(bytes) = load_bytes() else { return };
-    let plugin = Plugin::parse(&bytes).unwrap();
+    let plugin = Esm::parse(&bytes).unwrap();
     // At least one region should set the v1.3-only snow/blizzard weather chances,
     // confirming the variable-length WEAT field isn't hard-capped at the v1.2 size.
     let any_snow = plugin.records.iter().any(|r| match r {

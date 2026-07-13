@@ -8,7 +8,6 @@
 use crate::common::{
     Color, Subrecord, color, finish, flags, l1, le_f32, le_i32, le_u32, parse_or_default,
 };
-use crate::macros::parse_struct;
 use crate::shared::{AmbientLight, TravelDestination, ambient_light, travel_destination};
 use nom::IResult;
 use tes_core::L1String;
@@ -32,12 +31,18 @@ pub struct CellData {
     pub grid_y: i32,
 }
 
-parse_struct! {
-    fn cell_data -> CellData {
-        flags: flags,
-        grid_x: le_i32,
-        grid_y: le_i32,
-    }
+fn cell_data(input: &[u8]) -> IResult<&[u8], CellData> {
+    let (input, flags) = flags(input)?;
+    let (input, grid_x) = le_i32(input)?;
+    let (input, grid_y) = le_i32(input)?;
+    Ok((
+        input,
+        CellData {
+            flags,
+            grid_x,
+            grid_y,
+        },
+    ))
 }
 
 /// Position + rotation of a placed reference (`DATA`, 24 bytes; rotations in radians).
