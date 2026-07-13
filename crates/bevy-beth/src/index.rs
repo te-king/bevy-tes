@@ -84,9 +84,9 @@ pub struct ObjectInfo {
 pub struct EsmIndex {
     /// Lowercased editor id → object info.
     objects: HashMap<String, ObjectInfo>,
-    /// Lowercased interior cell name → index into `plugin.records`.
+    /// Lowercased interior cell name → index into `Esm::records`.
     interiors: HashMap<String, usize>,
-    /// Exterior grid → index into `plugin.records`.
+    /// Exterior grid → index into `Esm::records`.
     exteriors: HashMap<(i32, i32), usize>,
     /// Exterior grid → index of the cell's `LAND` record.
     lands: HashMap<(i32, i32), usize>,
@@ -98,57 +98,51 @@ pub struct EsmIndex {
 impl EsmIndex {
     /// Build the index in one pass over the plugin's records. Later records win on id
     /// collision, mirroring the game's last-definition-wins rule within a file.
-    pub fn build(plugin: &Esm) -> EsmIndex {
+    pub fn build(esm: &Esm<'_>) -> EsmIndex {
         let mut index = EsmIndex::default();
-        for (i, record) in plugin.records.iter().enumerate() {
+        for (i, record) in esm.records.iter().enumerate() {
             match record {
                 Record::Cell(cell) => {
                     if cell.data.flags.contains(CellFlags::INTERIOR) {
-                        index.interiors.insert(lower(&cell.name), i);
+                        index.interiors.insert(lower(cell.name), i);
                     } else {
                         index
                             .exteriors
                             .insert((cell.data.grid_x, cell.data.grid_y), i);
                     }
                 }
-                Record::Stat(r) => index.object_entry(&r.id, ObjectKind::Static, Some(&r.model)),
-                Record::Acti(r) => index.object_entry(&r.id, ObjectKind::Activator, Some(&r.model)),
-                Record::Cont(r) => index.object_entry(&r.id, ObjectKind::Container, Some(&r.model)),
-                Record::Door(r) => index.object_entry(&r.id, ObjectKind::Door, Some(&r.model)),
-                Record::Misc(r) => index.object_entry(&r.id, ObjectKind::Misc, Some(&r.model)),
-                Record::Weap(r) => index.object_entry(&r.id, ObjectKind::Weapon, Some(&r.model)),
-                Record::Armo(r) => index.object_entry(&r.id, ObjectKind::Armor, Some(&r.model)),
-                Record::Clot(r) => index.object_entry(&r.id, ObjectKind::Clothing, Some(&r.model)),
-                Record::Book(r) => index.object_entry(&r.id, ObjectKind::Book, Some(&r.model)),
-                Record::Ingr(r) => {
-                    index.object_entry(&r.id, ObjectKind::Ingredient, Some(&r.model))
-                }
-                Record::Lock(r) => index.object_entry(&r.id, ObjectKind::Lockpick, Some(&r.model)),
-                Record::Prob(r) => index.object_entry(&r.id, ObjectKind::Probe, Some(&r.model)),
-                Record::Repa(r) => index.object_entry(&r.id, ObjectKind::Repair, Some(&r.model)),
-                Record::Crea(r) => index.object_entry(&r.id, ObjectKind::Creature, Some(&r.model)),
-                Record::Body(r) => index.object_entry(&r.id, ObjectKind::BodyPart, Some(&r.model)),
-                Record::Alch(r) => {
-                    index.object_entry(&r.id, ObjectKind::Potion, r.model.as_deref())
-                }
-                Record::Appa(r) => {
-                    index.object_entry(&r.id, ObjectKind::Apparatus, r.model.as_deref())
-                }
-                Record::Npc(r) => index.object_entry(&r.id, ObjectKind::Npc, r.model.as_deref()),
+                Record::Stat(r) => index.object_entry(r.id, ObjectKind::Static, Some(r.model)),
+                Record::Acti(r) => index.object_entry(r.id, ObjectKind::Activator, Some(r.model)),
+                Record::Cont(r) => index.object_entry(r.id, ObjectKind::Container, Some(r.model)),
+                Record::Door(r) => index.object_entry(r.id, ObjectKind::Door, Some(r.model)),
+                Record::Misc(r) => index.object_entry(r.id, ObjectKind::Misc, Some(r.model)),
+                Record::Weap(r) => index.object_entry(r.id, ObjectKind::Weapon, Some(r.model)),
+                Record::Armo(r) => index.object_entry(r.id, ObjectKind::Armor, Some(r.model)),
+                Record::Clot(r) => index.object_entry(r.id, ObjectKind::Clothing, Some(r.model)),
+                Record::Book(r) => index.object_entry(r.id, ObjectKind::Book, Some(r.model)),
+                Record::Ingr(r) => index.object_entry(r.id, ObjectKind::Ingredient, Some(r.model)),
+                Record::Lock(r) => index.object_entry(r.id, ObjectKind::Lockpick, Some(r.model)),
+                Record::Prob(r) => index.object_entry(r.id, ObjectKind::Probe, Some(r.model)),
+                Record::Repa(r) => index.object_entry(r.id, ObjectKind::Repair, Some(r.model)),
+                Record::Crea(r) => index.object_entry(r.id, ObjectKind::Creature, Some(r.model)),
+                Record::Body(r) => index.object_entry(r.id, ObjectKind::BodyPart, Some(r.model)),
+                Record::Alch(r) => index.object_entry(r.id, ObjectKind::Potion, r.model),
+                Record::Appa(r) => index.object_entry(r.id, ObjectKind::Apparatus, r.model),
+                Record::Npc(r) => index.object_entry(r.id, ObjectKind::Npc, r.model),
                 Record::Ligh(r) => {
                     index.objects.insert(
-                        lower(&r.id),
+                        lower(r.id),
                         ObjectInfo {
                             kind: ObjectKind::Light,
-                            model: model_path(r.model.as_deref()),
+                            model: model_path(r.model),
                             light: Some(r.data),
                         },
                     );
                 }
                 // Indexed by kind only, so a skipped leveled-list reference logs as
                 // "leveled list" rather than "unknown id".
-                Record::Levi(r) => index.object_entry(&r.id, ObjectKind::LeveledItem, None),
-                Record::Levc(r) => index.object_entry(&r.id, ObjectKind::LeveledCreature, None),
+                Record::Levi(r) => index.object_entry(r.id, ObjectKind::LeveledItem, None),
+                Record::Levc(r) => index.object_entry(r.id, ObjectKind::LeveledCreature, None),
                 Record::Land(land) => {
                     index.lands.insert((land.grid_x, land.grid_y), i);
                 }
@@ -167,20 +161,20 @@ impl EsmIndex {
     }
 
     /// Look up a cell record by id (interior names match case-insensitively).
-    pub fn cell<'p>(&self, plugin: &'p Esm, id: &CellId) -> Option<&'p Cell> {
+    pub fn cell<'p>(&self, esm: &'p Esm<'p>, id: &CellId) -> Option<&'p Cell<'p>> {
         let i = match id {
             CellId::Interior(name) => *self.interiors.get(&name.to_lowercase())?,
             CellId::Exterior { x, y } => *self.exteriors.get(&(*x, *y))?,
         };
-        match plugin.records.get(i) {
+        match esm.records.get(i) {
             Some(Record::Cell(cell)) => Some(cell),
             _ => None,
         }
     }
 
     /// Look up an exterior cell's `LAND` record by grid coordinates.
-    pub fn land<'p>(&self, plugin: &'p Esm, x: i32, y: i32) -> Option<&'p Land> {
-        match plugin.records.get(*self.lands.get(&(x, y))?) {
+    pub fn land<'p>(&self, esm: &'p Esm<'p>, x: i32, y: i32) -> Option<&'p Land<'p>> {
+        match esm.records.get(*self.lands.get(&(x, y))?) {
             Some(Record::Land(land)) => Some(land),
             _ => None,
         }
@@ -188,8 +182,8 @@ impl EsmIndex {
 
     /// Look up a landscape texture by its `LTEX` index (what a LAND `VTEX` value − 1
     /// refers to).
-    pub fn ltex<'p>(&self, plugin: &'p Esm, index: u32) -> Option<&'p Ltex> {
-        match plugin.records.get(*self.ltexs.get(&index)?) {
+    pub fn ltex<'p>(&self, esm: &'p Esm<'p>, index: u32) -> Option<&'p Ltex<'p>> {
+        match esm.records.get(*self.ltexs.get(&index)?) {
             Some(Record::Ltex(ltex)) => Some(ltex),
             _ => None,
         }
@@ -224,17 +218,17 @@ fn model_path(model: Option<&L1Str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tes3_esm::L1String;
+    use tes3_esm::L1Str;
     use tes3_esm::records::cell::{Cell, CellData};
     use tes3_esm::records::crea::Crea;
     use tes3_esm::records::ligh::Ligh;
     use tes3_esm::records::stat::Stat;
 
-    fn l1(s: &str) -> L1String {
-        L1String::from_bytes(s.as_bytes().to_vec())
+    fn l1(s: &'static str) -> &'static L1Str {
+        L1Str::from_bytes(s.as_bytes())
     }
 
-    fn synthetic_plugin() -> Esm {
+    fn synthetic_plugin() -> Esm<'static> {
         Esm {
             header: Default::default(),
             records: vec![

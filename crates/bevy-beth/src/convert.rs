@@ -332,16 +332,42 @@ mod tests {
         }
     }
 
+    /// Buffers backing a synthetic LAND (the `Land` view borrows them; see
+    /// [`SyntheticLand::land`]).
+    struct SyntheticLand {
+        base: f32,
+        deltas: Vec<u8>,
+        normals: Option<Vec<u8>>,
+        colors: Option<Vec<u8>>,
+    }
+
+    impl SyntheticLand {
+        fn land(&self) -> Land<'_> {
+            Land {
+                height_offset: Some(self.base),
+                heights: Some(&self.deltas),
+                normals: self.normals.as_deref(),
+                colors: self.colors.as_deref(),
+                ..Land::default()
+            }
+        }
+    }
+
     /// A synthetic LAND: flat `base` height except vertex (1, 2) raised by `bump` VHGT
     /// units, with optional uniform normals/colors.
-    fn synthetic_land(base: f32, bump: i8, normals: Option<[u8; 3]>, colors: bool) -> Land {
+    fn synthetic_land(
+        base: f32,
+        bump: i8,
+        normals: Option<[u8; 3]>,
+        colors: bool,
+    ) -> SyntheticLand {
         let mut deltas = vec![0u8; LAND_GRID * LAND_GRID];
         // Raise (1, 2) then restore the running sum at (2, 2) so the rest stays flat.
         deltas[2 * LAND_GRID + 1] = bump as u8;
         deltas[2 * LAND_GRID + 2] = (-bump) as u8;
-        Land {
-            height_offset: Some(base),
-            heights: Some(deltas),
+        SyntheticLand {
+            base,
+            deltas,
             normals: normals.map(|n| {
                 n.iter()
                     .copied()
@@ -357,7 +383,6 @@ mod tests {
                     .take(LAND_GRID * LAND_GRID * 3)
                     .collect()
             }),
-            ..Land::default()
         }
     }
 
@@ -370,7 +395,7 @@ mod tests {
 
     #[test]
     fn land_mesh_layout_and_positions() {
-        let mesh = land_mesh(&synthetic_land(0.0, 5, None, false)).unwrap();
+        let mesh = land_mesh(&synthetic_land(0.0, 5, None, false).land()).unwrap();
         let positions = positions(&mesh);
         assert_eq!(positions.len(), 65 * 65);
         let Some(Indices::U32(indices)) = mesh.indices() else {
@@ -392,7 +417,7 @@ mod tests {
 
     #[test]
     fn land_mesh_winding_faces_up() {
-        let mesh = land_mesh(&synthetic_land(0.0, 0, None, false)).unwrap();
+        let mesh = land_mesh(&synthetic_land(0.0, 0, None, false).land()).unwrap();
         let positions = positions(&mesh);
         let Some(Indices::U32(indices)) = mesh.indices() else {
             panic!("expected U32 indices");
@@ -413,7 +438,7 @@ mod tests {
     #[test]
     fn land_mesh_maps_normals_and_colors() {
         // Game +Z normals become Bevy +Y.
-        let mesh = land_mesh(&synthetic_land(0.0, 0, Some([0, 0, 127]), true)).unwrap();
+        let mesh = land_mesh(&synthetic_land(0.0, 0, Some([0, 0, 127]), true).land()).unwrap();
         let normals = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap() {
             bevy::mesh::VertexAttributeValues::Float32x3(v) => v,
             other => panic!("unexpected normal format: {other:?}"),
@@ -430,7 +455,7 @@ mod tests {
         assert!((colors[0][2] - 0.2158) < 1e-3);
 
         // VNML absent → normals still present (computed); VCLR absent → no color attribute.
-        let bare = land_mesh(&synthetic_land(0.0, 0, None, false)).unwrap();
+        let bare = land_mesh(&synthetic_land(0.0, 0, None, false).land()).unwrap();
         assert!(bare.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
         assert!(bare.attribute(Mesh::ATTRIBUTE_COLOR).is_none());
     }

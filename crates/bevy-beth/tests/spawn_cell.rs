@@ -21,21 +21,25 @@ use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags, VTEX_GRI
 use tes3_esm::records::ligh::{Ligh, LightData};
 use tes3_esm::records::ltex::Ltex;
 use tes3_esm::records::stat::Stat;
-use tes3_esm::{Esm, L1String, Record};
+use tes3_esm::{Esm, L1Str, Record};
 
 use bevy_beth::{
     CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
-    EsmAsset, EsmIndex, TerrainSplatMaterial,
+    EsmAsset, TerrainSplatMaterial,
 };
 
 mod common;
 use common::{app_with_assets, pump_until_loaded};
 
-fn l1(s: &str) -> L1String {
-    L1String::from_bytes(s.as_bytes().to_vec())
+fn l1(s: &'static str) -> &'static L1Str {
+    L1Str::from_bytes(s.as_bytes())
 }
 
-fn reference(id: u32, object: &str, transform: Option<ReferenceTransform>) -> Reference {
+fn reference(
+    id: u32,
+    object: &'static str,
+    transform: Option<ReferenceTransform>,
+) -> Reference<'static> {
     Reference {
         id,
         object: l1(object),
@@ -48,7 +52,7 @@ fn reference(id: u32, object: &str, transform: Option<ReferenceTransform>) -> Re
 /// model doesn't exist in any VFS), a model-less light, a creature (skipped), a disabled
 /// static (skipped), an unknown id (skipped) — plus water.
 fn synthetic_asset() -> EsmAsset {
-    let plugin = Esm {
+    let esm = Esm {
         header: Default::default(),
         records: vec![
             Record::Stat(Stat {
@@ -97,8 +101,7 @@ fn synthetic_asset() -> EsmAsset {
             }),
         ],
     };
-    let index = EsmIndex::build(&plugin);
-    EsmAsset { plugin, index }
+    EsmAsset::from_static(esm)
 }
 
 /// Pump the app until the seed resolves (spawned or failed), up to a frame budget.
@@ -199,12 +202,15 @@ fn vtex_bytes(logical: &[u16; VTEX_GRID * VTEX_GRID]) -> Vec<u8> {
 /// With `vtex`, the LAND also carries a texture grid — value 1 (LTEX 0, `tx_a.dds`)
 /// everywhere except texel (5, 9), which is value 2 (LTEX 1, `tx_b.dds`).
 fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
+    // The synthetic Esm is 'static, so the computed VTEX blob is leaked (a few hundred
+    // bytes, once per test).
     let texture_data = vtex.then(|| {
         let mut logical = [1u16; VTEX_GRID * VTEX_GRID];
         logical[9 * VTEX_GRID + 5] = 2;
-        vtex_bytes(&logical)
+        &*Box::leak(vtex_bytes(&logical).into_boxed_slice())
     });
-    let plugin = Esm {
+    static ZERO_HEIGHTS: [u8; LAND_GRID * LAND_GRID] = [0; LAND_GRID * LAND_GRID];
+    let esm = Esm {
         header: Default::default(),
         records: vec![
             Record::Stat(Stat {
@@ -235,14 +241,13 @@ fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
                 grid_y: 2,
                 data_types: LandFlags::HAS_HEIGHTS | LandFlags::HAS_TEXTURES,
                 height_offset: Some(-10.0),
-                heights: Some(vec![0; LAND_GRID * LAND_GRID]),
+                heights: Some(&ZERO_HEIGHTS),
                 texture_data,
                 ..Default::default()
             }),
         ],
     };
-    let index = EsmIndex::build(&plugin);
-    EsmAsset { plugin, index }
+    EsmAsset::from_static(esm)
 }
 
 #[test]
@@ -419,7 +424,7 @@ fn interior_cell_spawns_references() {
         let cell = asset
             .index
             .cell(
-                &asset.plugin,
+                asset.esm(),
                 &CellId::interior("balmora, caius cosades' house"),
             )
             .expect("cell exists");
@@ -484,7 +489,7 @@ fn exterior_cell_spawns_references() {
         let esms = app.world().resource::<Assets<EsmAsset>>();
         let asset = esms.get(&esm).expect("ESM loaded");
         asset
-            .plugin
+            .esm()
             .records
             .iter()
             .find_map(|r| match r {
@@ -493,11 +498,11 @@ fn exterior_cell_spawns_references() {
                 {
                     let land = asset
                         .index
-                        .land(&asset.plugin, c.data.grid_x, c.data.grid_y)?;
+                        .land(asset.esm(), c.data.grid_x, c.data.grid_y)?;
                     let heights = land.decode_heights()?;
                     // Recomputed from the raw fields, independently of decode_heights.
                     let first = (land.height_offset.unwrap()
-                        + (land.heights.as_ref().unwrap()[0] as i8) as f32)
+                        + (land.heights.unwrap()[0] as i8) as f32)
                         * HEIGHT_SCALE;
                     let min = heights.into_iter().fold(f32::INFINITY, f32::min);
                     let distinct = land
