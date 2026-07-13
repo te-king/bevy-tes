@@ -1,16 +1,15 @@
-//! CLI for inspecting TES3 plugins and BSA archives.
+//! CLI for inspecting and extracting from TES3 BSA archives.
+//!
+//! Plugin (.esm/.esp) inspection lives in tes3-esm's `inspect` example.
 
-use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use tes3_bsa::Bsa;
-use tes3_esm::Esm;
-use tes3_esm::records::tes3::HeaderFlags;
 
-/// Inspect Morrowind (TES3) data files.
+/// Inspect Morrowind (TES3) BSA archives.
 #[derive(Parser, Debug)]
 #[command(version, about, arg_required_else_help = true)]
 struct Cli {
@@ -20,21 +19,6 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Parse a plugin (.esm/.esp) and print a summary.
-    Esm {
-        /// Path to the plugin file.
-        #[arg(default_value = "data/Morrowind.esm")]
-        path: PathBuf,
-    },
-    /// Inspect or extract from a BSA archive.
-    Bsa {
-        #[command(subcommand)]
-        command: BsaCommand,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum BsaCommand {
     /// List the contents of a BSA archive.
     List {
         /// Path to the .bsa archive.
@@ -65,56 +49,13 @@ enum BsaCommand {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Command::Esm { path } => run_esm(&path),
-        Command::Bsa { command } => match command {
-            BsaCommand::List {
-                archive: path,
-                limit,
-            } => run_bsa(&path, limit),
-            BsaCommand::Extract { archive, name, out } => {
-                run_extract(&archive, &name, out.as_deref())
-            }
-            BsaCommand::ExtractAll { archive, out } => run_extract_all(&archive, &out),
-        },
+        Command::List {
+            archive: path,
+            limit,
+        } => run_bsa(&path, limit),
+        Command::Extract { archive, name, out } => run_extract(&archive, &name, out.as_deref()),
+        Command::ExtractAll { archive, out } => run_extract_all(&archive, &out),
     }
-}
-
-fn run_esm(path: &Path) -> ExitCode {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) => return fail(path, &e),
-    };
-    let plugin = match Esm::parse(&bytes) {
-        Ok(p) => p,
-        Err(e) => return fail(path, &e),
-    };
-
-    let h = &plugin.header;
-    println!("File:        {}", path.display());
-    println!("Version:     {}", h.version);
-    println!("Master flag: {}", h.flags.contains(HeaderFlags::MASTER));
-    println!("Company:     {}", h.company);
-    println!("Description: {}", h.description.decode().trim());
-    println!("Declared records: {}", h.num_records);
-    if !h.masters.is_empty() {
-        println!("Masters:");
-        for m in &h.masters {
-            println!("  - {} ({} bytes)", m.name, m.size);
-        }
-    }
-
-    println!("\nParsed records: {}", plugin.records.len());
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for record in &plugin.records {
-        *counts.entry(record.tag().to_string()).or_default() += 1;
-    }
-    println!("\nRecords by type:");
-    let mut by_count: Vec<_> = counts.iter().collect();
-    by_count.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-    for (tag, count) in by_count {
-        println!("  {tag}  {count}");
-    }
-    ExitCode::SUCCESS
 }
 
 fn run_bsa(path: &Path, limit: Option<usize>) -> ExitCode {

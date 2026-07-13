@@ -21,6 +21,7 @@ bitflags = "2"
 nom = "8"
 thiserror = "2"
 self_cell = "1.2.2"
+memmap2 = "0.9"
 bevy = { version = "0.19", default-features = false, features = ["bevy_asset"] }
 clap = { version = "4", features = ["derive"] }
 
