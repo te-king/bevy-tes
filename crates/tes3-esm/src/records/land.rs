@@ -99,8 +99,10 @@ impl<'a> Land<'a> {
     pub fn texture_indices(&self) -> impl Iterator<Item = u16> + '_ {
         self.texture_data
             .unwrap_or(&[])
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
     }
 
     /// Decode `VTEX` into the 16×16 texture-index grid, row-major from the cell's
@@ -167,9 +169,11 @@ impl<'a> Land<'a> {
         }
         Some(
             bytes
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .map(|c| {
-                    let [x, y, z] = [c[0], c[1], c[2]].map(|b| (b as i8) as f32);
+                    let [x, y, z] = c.map(|b| (b as i8) as f32);
                     let len = (x * x + y * y + z * z).sqrt();
                     if len == 0.0 {
                         [0.0, 0.0, 1.0]
@@ -191,7 +195,7 @@ impl<'a> Land<'a> {
         if bytes.len() != LAND_GRID * LAND_GRID * 3 {
             return None;
         }
-        Some(bytes.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect())
+        Some(bytes.as_chunks::<3>().0.to_vec())
     }
 }
 
