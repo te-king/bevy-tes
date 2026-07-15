@@ -85,14 +85,14 @@ impl<'a> BsaDirectory<'a> {
         // Each name offset points into the name blob; each (size, offset) pair locates a
         // file's bytes within the data section. Out-of-range indices mean a corrupt
         // archive, so surface them as parse failures rather than panicking.
-        let names = name_offsets.chunks_exact(4).map(|chunk| {
-            let off = u32::from_le_bytes(chunk.try_into().unwrap()) as usize;
+        let names = name_offsets.as_chunks::<4>().0.iter().map(|chunk| {
+            let off = u32::from_le_bytes(*chunk) as usize;
             names_buffer
                 .get(off..)
                 .map(TesPath::from_bytes_until_null)
                 .ok_or_else(|| nom_fail(names_buffer))
         });
-        let data_slices = size_offsets.chunks_exact(8).map(|chunk| {
+        let data_slices = size_offsets.as_chunks::<8>().0.iter().map(|chunk| {
             let size = u32::from_le_bytes(chunk[0..4].try_into().unwrap()) as usize;
             let offset = u32::from_le_bytes(chunk[4..8].try_into().unwrap()) as usize;
             data_buffer

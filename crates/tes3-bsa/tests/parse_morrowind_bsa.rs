@@ -48,11 +48,11 @@ fn dds_textures_have_the_dds_magic() {
 /// Fold bytes into a checksum fast enough to stay memory-bandwidth bound, so the read
 /// can't be optimized away.
 fn fold(mut acc: u64, data: &[u8]) -> u64 {
-    let mut chunks = data.chunks_exact(8);
-    for c in &mut chunks {
-        acc ^= u64::from_le_bytes(c.try_into().unwrap());
+    let (chunks, remainder) = data.as_chunks::<8>();
+    for c in chunks {
+        acc ^= u64::from_le_bytes(*c);
     }
-    for &b in chunks.remainder() {
+    for &b in remainder {
         acc = acc.rotate_left(8) ^ b as u64;
     }
     acc

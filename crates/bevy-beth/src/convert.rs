@@ -424,7 +424,7 @@ mod tests {
         };
         // Counter-clockwise front faces must point +Y (up) so terrain survives default
         // backface culling when viewed from above.
-        for tri in indices.chunks_exact(3).take(4) {
+        for tri in indices.as_chunks::<3>().0.iter().take(4) {
             let [p0, p1, p2] = [
                 Vec3::from(positions[tri[0] as usize]),
                 Vec3::from(positions[tri[1] as usize]),
