@@ -422,11 +422,7 @@ fn interior_cell_spawns_references() {
         let esms = app.world().resource::<Assets<EsmAsset>>();
         let asset = esms.get(&esm).expect("ESM loaded");
         let cell = asset
-            .index
-            .cell(
-                asset.esm(),
-                &CellId::interior("balmora, caius cosades' house"),
-            )
+            .cell(&CellId::interior("balmora, caius cosades' house"))
             .expect("cell exists");
         let reference = cell
             .references
@@ -434,7 +430,6 @@ fn interior_cell_spawns_references() {
             .find(|r| {
                 r.transform.is_some()
                     && asset
-                        .index
                         .object(&r.object.decode())
                         .is_some_and(|o| o.kind == bevy_beth::ObjectKind::Static)
             })
@@ -496,9 +491,7 @@ fn exterior_cell_spawns_references() {
                 Record::Cell(c)
                     if !c.data.flags.contains(CellFlags::INTERIOR) && c.references.len() > 20 =>
                 {
-                    let land = asset
-                        .index
-                        .land(asset.esm(), c.data.grid_x, c.data.grid_y)?;
+                    let land = asset.land(c.data.grid_x, c.data.grid_y)?;
                     let heights = land.decode_heights()?;
                     // Recomputed from the raw fields, independently of decode_heights.
                     let first = (land.height_offset.unwrap()

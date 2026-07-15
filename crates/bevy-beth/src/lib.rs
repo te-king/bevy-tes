@@ -71,10 +71,13 @@ use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
 use tes_nif::{Nif, NifError};
+use tes3_esm::records::cell::Cell;
+use tes3_esm::records::land::Land;
+use tes3_esm::records::ltex::Ltex;
 use tes3_esm::{Esm, EsmDirectory, EsmError};
 
-pub mod index;
-pub mod vfs;
+pub mod tes_loadorder;
+pub mod tes_vfs;
 
 #[cfg(feature = "scene")]
 pub mod cell;
@@ -89,10 +92,10 @@ pub mod terrain;
 pub use cell::{
     CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
 };
-pub use index::{CellId, EsmIndex, ObjectInfo, ObjectKind};
 #[cfg(feature = "scene")]
 pub use terrain::{TerrainPlugin, TerrainSplatMaterial};
-pub use vfs::{TesVfs, TesVfsReader};
+pub use tes_loadorder::{CellId, ObjectInfo, ObjectKind, TesLoadOrder};
+pub use tes_vfs::{TesVfs, TesVfsReader};
 
 pub use tes_nif;
 /// Re-exports of the underlying parser crates, so downstream code can name the parsed
@@ -110,46 +113,74 @@ pub const TES_SOURCE: &str = "tes";
 #[derive(Resource, Clone)]
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
-/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`]: an owned [`Esm`]
-/// (the file bytes plus the zero-copy [`EsmDirectory`] view borrowing them, reached via
-/// [`EsmAsset::esm`]) alongside a lookup index over its records.
+/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`].
+///
+/// It holds a [`TesLoadOrder`] — the owned plugin buffers plus lookup tables borrowing
+/// their records. Today the loader feeds it one plugin per file (so [`EsmAsset::esm`]
+/// exposes that single directory); the structure is ready for a full multi-plugin load
+/// order once plugin-list ingest lands.
 #[derive(Asset, TypePath)]
 pub struct EsmAsset {
-    esm: Esm,
-    /// Lookups over the records (editor id → object, cell name/grid → `CELL`), built
-    /// once at load time. Fully owned, so it sits beside the parsed view.
-    pub index: EsmIndex,
+    load_order: TesLoadOrder,
 }
 
 impl EsmAsset {
-    /// Parse `bytes` and build the index. The bytes stay alive inside the asset; the
-    /// parsed records borrow them.
+    /// Parse `bytes` and build the lookup tables. The bytes stay alive inside the asset;
+    /// the parsed records borrow them.
     pub fn parse(bytes: Vec<u8>) -> Result<EsmAsset, EsmError> {
         let esm = Esm::parse(bytes)?;
-        let index = EsmIndex::build(esm.directory());
-        Ok(EsmAsset { esm, index })
+        Ok(EsmAsset {
+            load_order: TesLoadOrder::from_esms(vec![esm]),
+        })
     }
 
     /// Wrap an in-memory [`EsmDirectory<'static>`] (e.g. a synthetic test plugin built
     /// from `&'static` literals) without a backing buffer.
     pub fn from_static(directory: EsmDirectory<'static>) -> EsmAsset {
-        let esm = Esm::from_static(directory);
-        let index = EsmIndex::build(esm.directory());
-        EsmAsset { esm, index }
+        EsmAsset {
+            load_order: TesLoadOrder::from_esms(vec![Esm::from_static(directory)]),
+        }
     }
 
-    /// The parsed plugin directory: header plus all records in file order.
+    /// The load order backing this asset.
+    pub fn load_order(&self) -> &TesLoadOrder {
+        &self.load_order
+    }
+
+    /// The (single) plugin's parsed directory: header plus all records in file order.
+    ///
+    /// A temporary single-plugin accessor — it names the first plugin in the load order.
     pub fn esm(&self) -> &EsmDirectory<'_> {
-        self.esm.directory()
+        self.load_order.esms()[0].directory()
+    }
+
+    /// Look up a placeable object by editor id (any case).
+    pub fn object(&self, id: &str) -> Option<&ObjectInfo<'_>> {
+        self.load_order.object(id)
+    }
+
+    /// Look up a cell record by id (interior names match case-insensitively).
+    pub fn cell(&self, id: &CellId) -> Option<&Cell<'_>> {
+        self.load_order.cell(id)
+    }
+
+    /// Look up an exterior cell's `LAND` record by grid coordinates.
+    pub fn land(&self, x: i32, y: i32) -> Option<&Land<'_>> {
+        self.load_order.land(x, y)
+    }
+
+    /// Look up a landscape texture by its `LTEX` index (what a LAND `VTEX` value − 1
+    /// refers to).
+    pub fn ltex(&self, index: u32) -> Option<&Ltex<'_>> {
+        self.load_order.ltex(index)
     }
 }
 
-// Manual: the owned Esm's buffer must not leak into the asset's Debug output.
+// Manual: the owned plugin buffers must not leak into the asset's Debug output.
 impl std::fmt::Debug for EsmAsset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EsmAsset")
-            .field("esm", self.esm())
-            .field("index", &self.index)
+            .field("load_order", &self.load_order)
             .finish()
     }
 }
