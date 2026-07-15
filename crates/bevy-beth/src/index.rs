@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use tes_core::{TesId, TesIdBuf};
 use tes3_esm::records::cell::Cell;
 use tes3_esm::records::cell::CellFlags;
 use tes3_esm::records::land::Land;
@@ -82,10 +83,10 @@ pub struct ObjectInfo {
 /// `CELL` record. Built once by the ESM loader; see the [module docs](self).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EsmIndex {
-    /// Lowercased editor id → object info.
-    objects: HashMap<String, ObjectInfo>,
-    /// Lowercased interior cell name → index into `EsmDirectory::records`.
-    interiors: HashMap<String, usize>,
+    /// Editor id → object info. [`TesIdBuf`] keys fold case, so lookups need no allocation.
+    objects: HashMap<TesIdBuf, ObjectInfo>,
+    /// Interior cell name → index into `EsmDirectory::records`. Case-folded key.
+    interiors: HashMap<TesIdBuf, usize>,
     /// Exterior grid → index into `EsmDirectory::records`.
     exteriors: HashMap<(i32, i32), usize>,
     /// Exterior grid → index of the cell's `LAND` record.
@@ -104,7 +105,7 @@ impl EsmIndex {
             match record {
                 Record::Cell(cell) => {
                     if cell.data.flags.contains(CellFlags::INTERIOR) {
-                        index.interiors.insert(lower(cell.name), i);
+                        index.interiors.insert(TesId::new(cell.name).to_owned(), i);
                     } else {
                         index
                             .exteriors
@@ -131,7 +132,7 @@ impl EsmIndex {
                 Record::Npc(r) => index.object_entry(r.id, ObjectKind::Npc, r.model),
                 Record::Ligh(r) => {
                     index.objects.insert(
-                        lower(r.id),
+                        TesId::new(r.id).to_owned(),
                         ObjectInfo {
                             kind: ObjectKind::Light,
                             model: model_path(r.model),
@@ -157,13 +158,13 @@ impl EsmIndex {
 
     /// Look up a placeable object by editor id (any case).
     pub fn object(&self, id: &str) -> Option<&ObjectInfo> {
-        self.objects.get(&id.to_lowercase())
+        self.objects.get(TesId::from_bytes(id.as_bytes()))
     }
 
     /// Look up a cell record by id (interior names match case-insensitively).
     pub fn cell<'p>(&self, esm: &'p EsmDirectory<'p>, id: &CellId) -> Option<&'p Cell<'p>> {
         let i = match id {
-            CellId::Interior(name) => *self.interiors.get(&name.to_lowercase())?,
+            CellId::Interior(name) => *self.interiors.get(TesId::from_bytes(name.as_bytes()))?,
             CellId::Exterior { x, y } => *self.exteriors.get(&(*x, *y))?,
         };
         match esm.records.get(i) {
@@ -191,7 +192,7 @@ impl EsmIndex {
 
     fn object_entry(&mut self, id: &L1Str, kind: ObjectKind, model: Option<&L1Str>) {
         self.objects.insert(
-            lower(id),
+            TesId::new(id).to_owned(),
             ObjectInfo {
                 kind,
                 model: model_path(model),
@@ -199,10 +200,6 @@ impl EsmIndex {
             },
         );
     }
-}
-
-fn lower(s: &L1Str) -> String {
-    s.decode().to_lowercase()
 }
 
 /// Normalize a `MODL` value for VFS lookup; empty strings (some records carry an empty

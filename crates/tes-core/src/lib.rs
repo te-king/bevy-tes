@@ -12,11 +12,15 @@
 //! - [`tes_path`] — the game-data path normal form (case-insensitive, `\`-separated)
 //!   shared by every index that looks paths up, and [`TesPath`]/[`TesPathBuf`], the
 //!   borrowed/owned view types that compare and hash in that form.
+//! - [`tes_id`] — [`TesId`]/[`TesIdBuf`], the same view pair for case-insensitive editor
+//!   ids (no separator folding).
 
 pub mod bytes;
 pub mod latin1;
 pub mod math;
+pub mod tes_id;
 pub mod tes_path;
 
 pub use latin1::{L1Str, L1String};
+pub use tes_id::{TesId, TesIdBuf};
 pub use tes_path::{TesPath, TesPathBuf};
