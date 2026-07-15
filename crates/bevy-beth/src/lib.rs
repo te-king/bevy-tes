@@ -155,7 +155,7 @@ impl EsmAsset {
     }
 
     /// Look up a placeable object by editor id (any case).
-    pub fn object(&self, id: &str) -> Option<&ObjectInfo> {
+    pub fn object(&self, id: &str) -> Option<&ObjectInfo<'_>> {
         self.load_order.object(id)
     }
 

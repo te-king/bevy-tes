@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 
 use self_cell::self_cell;
-use tes_core::{L1Str, TesId};
+use tes_core::{L1Str, TesId, TesPath};
 use tes3_esm::records::cell::{Cell, CellFlags};
 use tes3_esm::records::land::Land;
 use tes3_esm::records::ligh::LightData;
@@ -79,11 +79,13 @@ pub enum ObjectKind {
 /// What a cell reference's editor id resolves to: the record kind, its model path, and
 /// (for lights) the light parameters.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ObjectInfo {
+pub struct ObjectInfo<'a> {
     pub kind: ObjectKind,
-    /// Model path as authored, normalized (lowercase, `\` separators), relative to
-    /// `meshes\` — e.g. `f\act_bm_firelake00.nif`. `None` for model-less records.
-    pub model: Option<String>,
+    /// Model path as authored — a [`TesPath`] view borrowing the record's `MODL` bytes,
+    /// so it compares and hashes case- and separator-insensitively (e.g.
+    /// `F\Act_BM_FireLake00.NIF`), relative to `meshes\`. `None` for model-less records
+    /// and empty `MODL` subrecords.
+    pub model: Option<&'a TesPath>,
     /// Present only for [`ObjectKind::Light`].
     pub light: Option<LightData>,
 }
@@ -109,7 +111,7 @@ self_cell!(
 struct TesLoadOrderTable<'a> {
     /// Editor id → object info. Keys borrow the record id bytes and fold case, so lookups
     /// need no allocation.
-    objects: HashMap<&'a TesId, ObjectInfo>,
+    objects: HashMap<&'a TesId, ObjectInfo<'a>>,
     /// Interior cell name → its `CELL` record. Case-folded key.
     interiors: HashMap<&'a TesId, &'a Cell<'a>>,
     /// Exterior grid → its `CELL` record.
@@ -136,7 +138,7 @@ impl TesLoadOrder {
     }
 
     /// Look up a placeable object by editor id (any case).
-    pub fn object(&self, id: &str) -> Option<&ObjectInfo> {
+    pub fn object(&self, id: &str) -> Option<&ObjectInfo<'_>> {
         self.table().objects.get(TesId::from_bytes(id.as_bytes()))
     }
 
@@ -276,14 +278,15 @@ fn object_entry<'a>(
     );
 }
 
-/// Normalize a `MODL` value for VFS lookup; empty strings (some records carry an empty
-/// subrecord) become `None`.
-fn model_path(model: Option<&L1Str>) -> Option<String> {
+/// View a `MODL` value as a [`TesPath`] for VFS lookup; empty strings (some records carry
+/// an empty subrecord) become `None`. Case/separator folding is deferred to `TesPath`, so
+/// this neither copies nor normalizes.
+fn model_path(model: Option<&L1Str>) -> Option<&TesPath> {
     let model = model?;
     if model.is_empty() {
         return None;
     }
-    Some(tes_core::tes_path::normalize(&model.decode()))
+    Some(TesPath::new(model))
 }
 
 #[cfg(test)]
@@ -362,7 +365,11 @@ mod tests {
 
         let stat = order.object("T_STAT").expect("stat by upper-cased id");
         assert_eq!(stat.kind, ObjectKind::Static);
-        assert_eq!(stat.model.as_deref(), Some(r"f\furn_thing.nif"));
+        let model = stat.model.expect("stat has a model");
+        // The view borrows the original MODL bytes unchanged (no normalizing copy)...
+        assert_eq!(model.as_bytes(), br"F\Furn_Thing.NIF");
+        // ...but as a TesPath it still matches case- and separator-folded.
+        assert_eq!(model, TesPath::from_bytes(br"f/furn_thing.nif"));
         assert_eq!(stat.light, None);
 
         let light = order.object("Light_Fire").expect("light by mixed-case id");
@@ -431,8 +438,13 @@ mod tests {
             TesLoadOrder::from_esms(vec![Esm::from_static(earlier), Esm::from_static(later)]);
 
         assert_eq!(
-            order.object("shared_stat").unwrap().model.as_deref(),
-            Some(r"b\two.nif"),
+            order
+                .object("shared_stat")
+                .unwrap()
+                .model
+                .unwrap()
+                .as_bytes(),
+            br"b\two.nif",
             "later plugin's definition should win"
         );
     }

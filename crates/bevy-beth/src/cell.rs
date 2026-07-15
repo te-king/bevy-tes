@@ -300,8 +300,9 @@ impl CellSpawner<'_, '_, '_> {
             ChildOf(self.seed_entity),
         ));
 
-        if let Some(model) = &info.model {
-            match self.vfs.0.resolve_model(model) {
+        if let Some(model) = info.model {
+            let decoded = model.decode();
+            match self.vfs.0.resolve_model(&decoded) {
                 Some(path) => {
                     child.insert(WorldAssetRoot(
                         self.asset_server
@@ -309,8 +310,8 @@ impl CellSpawner<'_, '_, '_> {
                     ));
                 }
                 None => {
-                    if self.warned.insert(model.clone()) {
-                        eprintln!("bevy-beth: cannot resolve model {model:?} (for {object_id:?})");
+                    if self.warned.insert(decoded.into_owned()) {
+                        eprintln!("bevy-beth: cannot resolve model {model} (for {object_id:?})");
                     }
                 }
             }
