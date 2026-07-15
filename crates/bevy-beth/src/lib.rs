@@ -74,7 +74,7 @@ use tes_nif::{Nif, NifError};
 use tes3_esm::{Esm, EsmDirectory, EsmError};
 
 pub mod index;
-pub mod vfs;
+pub mod tes_vfs;
 
 #[cfg(feature = "scene")]
 pub mod cell;
@@ -92,7 +92,7 @@ pub use cell::{
 pub use index::{CellId, EsmIndex, ObjectInfo, ObjectKind};
 #[cfg(feature = "scene")]
 pub use terrain::{TerrainPlugin, TerrainSplatMaterial};
-pub use vfs::{TesVfs, TesVfsReader};
+pub use tes_vfs::{TesVfs, TesVfsReader};
 
 pub use tes_nif;
 /// Re-exports of the underlying parser crates, so downstream code can name the parsed
