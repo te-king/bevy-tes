@@ -58,8 +58,8 @@ use tes3_esm::records::cell::{Cell, CellFlags, Reference};
 use tes3_esm::records::land::{CELL_SIZE, Land, VTEX_GRID};
 use tes3_esm::records::ligh::LightFlags;
 
-use crate::index::{CellId, ObjectKind};
 use crate::terrain::{self, MAX_TERRAIN_LAYERS, TerrainSplatMaterial};
+use crate::tes_loadorder::{CellId, ObjectKind};
 use crate::{EsmAsset, TesVfsHandle, convert};
 
 /// Point-light lumens per game-unit² of `LightData::radius`. A documented heuristic, not
@@ -173,7 +173,7 @@ pub fn spawn_cells(
             }
             continue; // still loading; try again next frame
         };
-        let Some(cell) = esm.index.cell(esm.esm(), &seed.cell) else {
+        let Some(cell) = esm.cell(&seed.cell) else {
             eprintln!("bevy-beth: cell {:?} not found in plugin", seed.cell);
             commands
                 .entity(seed_entity)
@@ -260,7 +260,7 @@ struct CellSpawner<'a, 'w, 's> {
 impl CellSpawner<'_, '_, '_> {
     fn spawn_reference(&mut self, reference: &Reference) {
         let object_id = reference.object.decode().into_owned();
-        let Some(info) = self.esm.index.object(&object_id) else {
+        let Some(info) = self.esm.object(&object_id) else {
             if self.warned.insert(object_id.clone()) {
                 eprintln!("bevy-beth: cell references unknown object id {object_id:?}");
             }
@@ -373,7 +373,7 @@ fn spawn_terrain(
     grid_x: i32,
     grid_y: i32,
 ) -> Option<f32> {
-    let land = esm.index.land(esm.esm(), grid_x, grid_y)?;
+    let land = esm.land(grid_x, grid_y)?;
     let mesh = convert::land_mesh(land)?;
     let min = land
         .decode_heights()?
@@ -486,7 +486,7 @@ fn layer_texture(
         // No explicit texture: the engine's hardcoded default.
         Cow::Borrowed("_land_default.tga")
     } else {
-        match esm.index.ltex(esm.esm(), value as u32 - 1) {
+        match esm.ltex(value as u32 - 1) {
             Some(ltex) => ltex.texture.decode(),
             None => {
                 warn_once(warned, format!("no LTEX record with index {}", value - 1));
