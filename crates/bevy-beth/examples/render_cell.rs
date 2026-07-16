@@ -8,9 +8,11 @@
 //!
 //! By default this waits until the cell's models have streamed in, frames the scene,
 //! saves one PNG and exits — printing the screenshot's absolute path. Pass `-o out.png`
-//! to choose where it lands, `--esm <file>` / `--data <dir>` for non-default data, or
-//! `--interactive` for a live window with Bevy's free camera (hold RMB to look, WASD to
-//! fly, E/Q up/down, Shift to run, scroll for speed).
+//! to choose where it lands, `--esm <file>` / `--data <dir>` for non-default data,
+//! `--load-order <file>` for a multi-plugin load order read from a plain-text file (one
+//! plugin per line, earliest first), or `--interactive` for a live window with Bevy's
+//! free camera (hold RMB to look, WASD to fly, E/Q up/down, Shift to run, scroll for
+//! speed).
 //!
 //! Cell resolution, reference placement, light spawning and NIF/texture loading all
 //! happen inside `bevy_beth`; this example stages a camera and lighting around the
@@ -38,7 +40,8 @@ use bevy::window::{ExitCondition, WindowResolution};
 use clap::Parser;
 
 use bevy_beth::{
-    BethPlugin, CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned, TerrainPlugin,
+    BethPlugin, CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned, LoadOrderHandle,
+    TerrainPlugin,
 };
 
 /// Render a TES3 cell with Bevy.
@@ -52,9 +55,15 @@ struct Args {
     #[arg(long, allow_hyphen_values = true)]
     exterior: Option<String>,
 
-    /// The plugin to read the cell from, as a game-data path.
+    /// The plugin to read the cell from, as a game-data path (a load order of one).
     #[arg(long, default_value = "Morrowind.esm")]
     esm: String,
+
+    /// A plain-text load-order file instead: one plugin filename per line (relative to
+    /// `--data`), earliest first (later plugins win); `#` comments and blank lines are
+    /// skipped.
+    #[arg(long, conflicts_with = "esm")]
+    load_order: Option<PathBuf>,
 
     /// The Morrowind `Data Files` directory to serve (loose files + `*.bsa`).
     #[arg(long, default_value = "data")]
@@ -107,9 +116,24 @@ fn main() -> ExitCode {
         CellId::Exterior { x, y } => format!("exterior {x},{y}"),
     };
 
+    let plugins: Vec<PathBuf> = match &args.load_order {
+        Some(path) => match bevy_beth::read_load_order(path) {
+            Ok(list) if !list.is_empty() => list,
+            Ok(_) => {
+                eprintln!("load-order file {} lists no plugins", path.display());
+                return ExitCode::FAILURE;
+            }
+            Err(e) => {
+                eprintln!("cannot read load order {}: {e}", path.display());
+                return ExitCode::FAILURE;
+            }
+        },
+        None => vec![PathBuf::from(&args.esm)],
+    };
+
     let mut app = App::new();
     // BethPlugin must precede DefaultPlugins: asset sources register before AssetPlugin.
-    app.add_plugins(BethPlugin::new(args.data.clone()));
+    app.add_plugins(BethPlugin::new(args.data.clone()).with_plugins(plugins));
 
     if args.interactive {
         app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -149,13 +173,13 @@ fn main() -> ExitCode {
         .add_systems(Update, capture);
     }
 
-    let esm_path = args.esm.clone();
     app.init_resource::<Framed>()
         .add_systems(
             Startup,
-            move |mut commands: Commands, asset_server: Res<AssetServer>| {
+            // BethPlugin finished before Startup, so the load-order handle exists.
+            move |mut commands: Commands, load_order: Res<LoadOrderHandle>| {
                 commands.spawn(CellSeed {
-                    load_order: asset_server.load(format!("tes://{esm_path}")),
+                    load_order: load_order.0.clone(),
                     cell: cell.clone(),
                 });
             },

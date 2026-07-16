@@ -43,7 +43,7 @@
 //! configured on the plugin itself:
 //! `BethPlugin::new("data").with_plugins(["Morrowind.esm", "Tribunal.esm"])` parses the
 //! listed files during startup and shares the result as the [`LoadOrderHandle`]
-//! resource.
+//! resource ([`read_load_order`] fills the list from a plain-text file).
 //!
 //! Whole **cells** (interiors or exterior grid squares) spawn the same way from a loaded
 //! load order — one child entity per placed object, each loading its own NIF scene (see
@@ -333,6 +333,7 @@ impl BethPlugin {
     }
 
     /// Builder: set the plugin load order (earliest first), enabling [`LoadOrderHandle`].
+    /// See [`read_load_order`] for filling the list from a plain-text file.
     pub fn with_plugins(mut self, plugins: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
         self.plugins = plugins.into_iter().map(Into::into).collect();
         self
@@ -434,5 +435,62 @@ impl Plugin for BethPlugin {
 fn init_asset_if_missing<A: bevy::asset::Asset>(app: &mut App) {
     if !app.world().contains_resource::<Assets<A>>() {
         app.init_asset::<A>();
+    }
+}
+
+/// Read a plain-text load-order file for [`BethPlugin::with_plugins`]: one plugin
+/// filename per line (relative to the data root), in load order (earliest first).
+/// Blank lines and lines starting with `#` are skipped; surrounding whitespace
+/// (including `\r`) is trimmed. There is no inline-comment syntax — `#` only comments
+/// out whole lines.
+pub fn read_load_order(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<PathBuf>> {
+    Ok(parse_load_order(&std::fs::read_to_string(path)?))
+}
+
+fn parse_load_order(text: &str) -> Vec<PathBuf> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(PathBuf::from)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_load_order;
+    use std::path::PathBuf;
+
+    fn paths(names: &[&str]) -> Vec<PathBuf> {
+        names.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn parses_plugins_in_authored_order() {
+        assert_eq!(
+            parse_load_order("Morrowind.esm\nTribunal.esm\nBloodmoon.esm\n"),
+            paths(&["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"])
+        );
+    }
+
+    #[test]
+    fn skips_comments_and_blank_lines() {
+        assert_eq!(
+            parse_load_order("# masters\n\nMorrowind.esm\n  # indented comment\n\nMod.esp\n"),
+            paths(&["Morrowind.esm", "Mod.esp"])
+        );
+    }
+
+    #[test]
+    fn trims_whitespace_and_crlf() {
+        assert_eq!(
+            parse_load_order("  Morrowind.esm \r\nTribunal.esm\r\n"),
+            paths(&["Morrowind.esm", "Tribunal.esm"])
+        );
+    }
+
+    #[test]
+    fn empty_input_yields_no_plugins() {
+        assert!(parse_load_order("").is_empty());
+        assert!(parse_load_order("\n# only a comment\n").is_empty());
     }
 }
