@@ -10,7 +10,7 @@ use bevy::mesh::Mesh;
 use bevy::pbr::StandardMaterial;
 use bevy::world_serialization::WorldAsset;
 
-use bevy_beth::NifAsset;
+use bevy_tes::NifAsset;
 
 mod common;
 use common::{app_with_assets, pump_until_loaded};

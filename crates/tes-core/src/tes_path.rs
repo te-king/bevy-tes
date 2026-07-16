@@ -18,7 +18,7 @@ use crate::{L1Str, L1String};
 
 /// Normalize a game-data path for lookup or comparison: ASCII-lowercase, `/` → `\`.
 ///
-/// This is the shared normal form used by `tes3_bsa`'s archive index and `bevy_beth`'s
+/// This is the shared normal form used by `tes3_bsa`'s archive index and `bevy_tes`'s
 /// VFS — indexes built with it and keys looked up through it always agree.
 pub fn normalize(path: &str) -> String {
     path.to_ascii_lowercase().replace('/', "\\")

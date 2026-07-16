@@ -1,4 +1,4 @@
-//! Integration tests for [`bevy_beth::BethPlugin`].
+//! Integration tests for [`bevy_tes::TesPlugin`].
 //!
 //! The wiring test always runs. The end-to-end tests load a real `Morrowind.esm`
 //! through Bevy's `AssetServer` — via the default source and via the `tes://` source —
@@ -6,7 +6,7 @@
 
 use bevy::asset::{AssetServer, Assets, Handle, LoadState};
 
-use bevy_beth::{BethPlugin, CellId, LoadOrderAsset, LoadOrderHandle, NifAsset};
+use bevy_tes::{CellId, LoadOrderAsset, LoadOrderHandle, NifAsset, TesPlugin};
 
 mod common;
 use common::{DATA_ROOT, app_with, app_with_assets, pump_until_loaded};
@@ -78,7 +78,7 @@ fn builds_load_order_from_plugin_list() {
         return;
     }
 
-    let mut app = app_with(BethPlugin::new(DATA_ROOT).with_plugins(["Morrowind.esm"]));
+    let mut app = app_with(TesPlugin::new(DATA_ROOT).with_plugins(["Morrowind.esm"]));
     let handle = app.world().resource::<LoadOrderHandle>().0.clone();
 
     let state = pump_until_loaded(&mut app, &handle);
@@ -104,7 +104,7 @@ fn merges_a_multi_plugin_load_order() {
         return;
     }
 
-    let mut app = app_with(BethPlugin::new(DATA_ROOT).with_plugins(masters));
+    let mut app = app_with(TesPlugin::new(DATA_ROOT).with_plugins(masters));
     let handle = app.world().resource::<LoadOrderHandle>().0.clone();
 
     let state = pump_until_loaded(&mut app, &handle);

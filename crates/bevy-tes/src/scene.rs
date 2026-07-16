@@ -232,7 +232,7 @@ impl SceneBuilder<'_> {
             let resolved = self.vfs.resolve_texture(&name);
             if resolved.is_none() {
                 eprintln!(
-                    "bevy-beth: {}: texture {name:?} not found in the VFS; using tint only",
+                    "bevy-tes: {}: texture {name:?} not found in the VFS; using tint only",
                     load_context.path()
                 );
             }

@@ -16,7 +16,8 @@ jobs:
       - uses: actions/checkout@v4
 
       # Bevy's Linux native deps (windowing/audio sys crates need these to compile).
-      # wayland/xkbcommon are required by winit, which the `render` feature pulls in.
+      # wayland/xkbcommon are required by winit, which the viewer crates
+      # (bevy-render-cell, bevy-render-nif) pull in.
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config
 
@@ -32,15 +33,12 @@ jobs:
       - name: clippy (workspace)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: clippy (render feature)
-        run: cargo clippy -p bevy-beth --all-targets --features render -- -D warnings
-
       # Game-data tests skip themselves when the (gitignored) fixtures are absent,
       # so the suite passes on a clean checkout; unit + synthetic tests still run.
       - name: test
         run: cargo test --workspace
 
-      # The scene-emitting NIF load path compiles headless (no winit); its game-data
-      # tests self-skip like the rest.
-      - name: test (scene feature)
-        run: cargo test -p bevy-beth --features scene
+      # Building the library alone keeps the viewer crates (and thus winit) out of
+      # the dependency graph — this is the headless-compile guarantee for bevy-tes.
+      - name: test (bevy-tes headless)
+        run: cargo test -p bevy-tes

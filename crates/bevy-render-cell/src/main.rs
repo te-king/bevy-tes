@@ -1,9 +1,9 @@
 //! Render a TES3 (Morrowind) cell — a whole interior or exterior grid square — with
-//! Bevy, spawned from an ESM through `bevy_beth`'s `CellSeed`:
+//! Bevy, spawned from an ESM through `bevy_tes`'s `CellSeed`:
 //!
 //! ```text
-//! cargo run -p bevy-beth --example render_cell --features render -- "Balmora, Guild of Mages"
-//! cargo run -p bevy-beth --example render_cell --features render -- --exterior=-3,-2
+//! cargo run --release -p bevy-render-cell -- "Balmora, Guild of Mages"
+//! cargo run --release -p bevy-render-cell -- --exterior=-3,-2
 //! ```
 //!
 //! By default this waits until the cell's models have streamed in, frames the scene,
@@ -15,7 +15,7 @@
 //! speed).
 //!
 //! Cell resolution, reference placement, light spawning and NIF/texture loading all
-//! happen inside `bevy_beth`; this example stages a camera and lighting around the
+//! happen inside `bevy_tes`; this binary stages a camera and lighting around the
 //! spawned entities. Exterior cells include their LAND terrain — texture-splatted from
 //! the VTEX grid via `TerrainPlugin`, tinted by the vertex colors — and a sea-level
 //! water plane where the ground dips below zero.
@@ -39,9 +39,9 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured, save_to_dis
 use bevy::window::{ExitCondition, WindowResolution};
 use clap::Parser;
 
-use bevy_beth::{
-    BethPlugin, CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned, LoadOrderHandle,
-    TerrainPlugin,
+use bevy_tes::{
+    CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned, LoadOrderHandle,
+    TerrainPlugin, TesPlugin,
 };
 
 /// Render a TES3 cell with Bevy.
@@ -117,7 +117,7 @@ fn main() -> ExitCode {
     };
 
     let plugins: Vec<PathBuf> = match &args.load_order {
-        Some(path) => match bevy_beth::read_load_order(path) {
+        Some(path) => match bevy_tes::read_load_order(path) {
             Ok(list) if !list.is_empty() => list,
             Ok(_) => {
                 eprintln!("load-order file {} lists no plugins", path.display());
@@ -132,8 +132,8 @@ fn main() -> ExitCode {
     };
 
     let mut app = App::new();
-    // BethPlugin must precede DefaultPlugins: asset sources register before AssetPlugin.
-    app.add_plugins(BethPlugin::new(args.data.clone()).with_plugins(plugins));
+    // TesPlugin must precede DefaultPlugins: asset sources register before AssetPlugin.
+    app.add_plugins(TesPlugin::new(args.data.clone()).with_plugins(plugins));
 
     if args.interactive {
         app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -176,7 +176,7 @@ fn main() -> ExitCode {
     app.init_resource::<Framed>()
         .add_systems(
             Startup,
-            // BethPlugin finished before Startup, so the load-order handle exists.
+            // TesPlugin finished before Startup, so the load-order handle exists.
             move |mut commands: Commands, load_order: Res<LoadOrderHandle>| {
                 commands.spawn(CellSeed {
                     load_order: load_order.0.clone(),

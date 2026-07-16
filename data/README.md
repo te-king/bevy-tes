@@ -28,7 +28,7 @@ data/
 ```
 
 A mesh references its textures by filename (e.g. `In_De_Shack_01.nif` names
-`Tx_wood_siding.tga`); `bevy-beth`'s NIF loader resolves those names under `textures/`
+`Tx_wood_siding.tga`); `bevy-tes`'s NIF loader resolves those names under `textures/`
 through its VFS — checking loose files first, then the BSA archives, case-insensitively.
 Because the engine sometimes ships a `.tga`-named texture as `.dds` (and vice versa),
 both extensions are tried.

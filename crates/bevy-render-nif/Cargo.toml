@@ -1,0 +1,14 @@
+[package]
+name = "bevy-render-nif"
+description = "Viewer binary rendering a single TES3 NIF model to a window or PNG"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy-tes = { workspace = true }
+# bevy-tes only asks for headless asset/scene features; the full renderer, windowing
+# and the built-in free camera come in here, where something is actually drawn.
+bevy = { workspace = true, features = ["3d", "bevy_camera_controller", "free_camera"] }
+clap = { workspace = true }

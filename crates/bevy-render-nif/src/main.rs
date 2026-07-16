@@ -4,7 +4,7 @@
 //! live loose in the data directory or inside a BSA archive — the VFS layers both:
 //!
 //! ```text
-//! cargo run -p bevy-beth --example render_nif --features render -- meshes/i/in_de_shack_01.nif
+//! cargo run --release -p bevy-render-nif -- meshes/i/in_de_shack_01.nif
 //! ```
 //!
 //! By default this renders one frame off a fixed three-quarter view, saves it to a PNG,
@@ -16,8 +16,8 @@
 //! look, WASD to fly, E/Q for up/down, Shift to run, scroll to rescale the base speed.
 //!
 //! All the loading heavy lifting — scene-graph traversal, texture resolution through
-//! loose files and archives, material construction — happens inside `bevy_beth`'s NIF
-//! loader; this example only spawns the scene and stages a camera, lights and ground
+//! loose files and archives, material construction — happens inside `bevy_tes`'s NIF
+//! loader; this binary only spawns the scene and stages a camera, lights and ground
 //! around whatever geometry shows up.
 
 use std::path::{Path, PathBuf};
@@ -32,7 +32,7 @@ use bevy::window::{ExitCondition, WindowResolution};
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use clap::Parser;
 
-use bevy_beth::{BethPlugin, NifAsset};
+use bevy_tes::{NifAsset, TesPlugin};
 
 /// Render a TES3 `.nif` model with Bevy.
 #[derive(Parser, Debug)]
@@ -100,8 +100,8 @@ fn main() -> ExitCode {
     let args = Args::parse();
 
     let mut app = App::new();
-    // BethPlugin must precede DefaultPlugins: asset sources register before AssetPlugin.
-    app.add_plugins(BethPlugin::new(args.data.clone()));
+    // TesPlugin must precede DefaultPlugins: asset sources register before AssetPlugin.
+    app.add_plugins(TesPlugin::new(args.data.clone()));
 
     if args.interactive {
         app.add_plugins(DefaultPlugins.set(WindowPlugin {

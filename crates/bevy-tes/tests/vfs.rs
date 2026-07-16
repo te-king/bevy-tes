@@ -1,4 +1,4 @@
-//! Tests for [`bevy_beth::TesVfs`] — the layered game-data view behind `tes://`.
+//! Tests for [`bevy_tes::TesVfs`] — the layered game-data view behind `tes://`.
 //!
 //! The synthetic tests build a throwaway directory tree and always run; the game-data
 //! tests skip themselves when the (gitignored) `data/` fixtures are absent.
@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use bevy_beth::TesVfs;
+use bevy_tes::TesVfs;
 
 /// A fresh temp directory tree with a couple of loose files, mimicking `Data Files`
 /// layout quirks (mixed case, nested dirs).
@@ -14,7 +14,7 @@ struct SyntheticRoot(PathBuf);
 
 impl SyntheticRoot {
     fn new(tag: &str) -> SyntheticRoot {
-        let root = std::env::temp_dir().join(format!("bevy-beth-vfs-{tag}-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("bevy-tes-vfs-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("Textures")).unwrap();
         fs::create_dir_all(root.join("meshes/x")).unwrap();

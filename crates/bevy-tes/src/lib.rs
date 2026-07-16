@@ -1,6 +1,6 @@
 //! Bevy integration for Bethesda Creation Engine (TES3 / Morrowind) data files.
 //!
-//! [`BethPlugin`] registers a **`tes://` asset source** backed by [`TesVfs`] — a layered,
+//! [`TesPlugin`] registers a **`tes://` asset source** backed by [`TesVfs`] — a layered,
 //! case-insensitive view of a Morrowind `Data Files` directory where loose files override
 //! BSA archives — plus [`AssetLoader`]s for the game's formats. Once the plugin is added,
 //! any file the game could resolve is loadable through the regular
@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! use bevy::prelude::*;
-//! use bevy_beth::{BethPlugin, LoadOrderAsset, NifAsset};
+//! use bevy_tes::{TesPlugin, LoadOrderAsset, NifAsset};
 //!
 //! fn load(asset_server: Res<AssetServer>) {
 //!     let _esm: Handle<LoadOrderAsset> = asset_server.load("tes://Morrowind.esm");
@@ -16,14 +16,14 @@
 //! }
 //!
 //! App::new()
-//!     // BethPlugin FIRST: asset sources must be registered before AssetPlugin
+//!     // TesPlugin FIRST: asset sources must be registered before AssetPlugin
 //!     // (part of DefaultPlugins) builds the AssetServer.
-//!     .add_plugins((BethPlugin::new("data"), DefaultPlugins))
+//!     .add_plugins((TesPlugin::new("data"), DefaultPlugins))
 //!     .add_systems(Startup, load)
 //!     .run();
 //! ```
 //!
-//! With the `scene` feature (implied by `render`), a NIF load additionally emits
+//! With the `scene` feature (on by default), a NIF load additionally emits
 //! spawnable content as labeled sub-assets — `Mesh`es, `StandardMaterial`s (their
 //! textures resolved through the VFS, so archive-only textures work), and a
 //! `WorldAsset` scene preserving the model's node hierarchy:
@@ -41,7 +41,7 @@
 //!
 //! A full **load order** — several plugins merged so later ones override earlier — is
 //! configured on the plugin itself:
-//! `BethPlugin::new("data").with_plugins(["Morrowind.esm", "Tribunal.esm"])` parses the
+//! `TesPlugin::new("data").with_plugins(["Morrowind.esm", "Tribunal.esm"])` parses the
 //! listed files during startup and shares the result as the [`LoadOrderHandle`]
 //! resource ([`read_load_order`] fills the list from a plain-text file).
 //!
@@ -50,7 +50,7 @@
 //! [`cell`]):
 //!
 //! ```ignore
-//! use bevy_beth::{CellId, CellSeed};
+//! use bevy_tes::{CellId, CellSeed};
 //!
 //! fn spawn(mut commands: Commands, asset_server: Res<AssetServer>) {
 //!     commands.spawn(CellSeed {
@@ -62,7 +62,7 @@
 //!
 //! # Plugin ordering
 //!
-//! `BethPlugin` **must be added before** Bevy's `AssetPlugin` (i.e. before
+//! `TesPlugin` **must be added before** Bevy's `AssetPlugin` (i.e. before
 //! `DefaultPlugins`): Bevy requires custom asset sources to be registered before the
 //! `AssetServer` is built. The plugin asserts this at startup. Headless apps that build
 //! the `App` manually must also call `app.finish()` for loaders to be registered.
@@ -110,17 +110,17 @@ pub use tes_nif;
 pub use tes3_bsa;
 pub use tes3_esm;
 
-/// The name of the asset source [`BethPlugin`] registers: load game data with paths like
+/// The name of the asset source [`TesPlugin`] registers: load game data with paths like
 /// `tes://meshes/i/in_de_shack_01.nif`.
 pub const TES_SOURCE: &str = "tes";
 
-/// Shared handle to the game-data VFS, inserted by [`BethPlugin`] so systems (and the
+/// Shared handle to the game-data VFS, inserted by [`TesPlugin`] so systems (and the
 /// NIF loader) can query the same layered view the `tes://` source serves.
 #[derive(Resource, Clone)]
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
-/// The app's load order, inserted by [`BethPlugin`] when it was given a plugin list
-/// (see [`BethPlugin::with_plugins`]); absent when the list is empty. The handle starts
+/// The app's load order, inserted by [`TesPlugin`] when it was given a plugin list
+/// (see [`TesPlugin::with_plugins`]); absent when the list is empty. The handle starts
 /// loading during plugin finish — poll [`AssetServer::load_state`], or just seed a
 /// [`CellSeed`](cell::CellSeed) with it and let `spawn_cells` wait.
 #[derive(Resource, Clone, Debug)]
@@ -132,7 +132,7 @@ pub struct LoadOrderHandle(pub Handle<LoadOrderAsset>);
 /// It holds a [`TesLoadOrder`]: the owned plugin buffers plus lookup tables borrowing
 /// their records, merged earliest-first so later plugins win on id/grid collision.
 /// Loading a plugin file directly (`asset_server.load("tes://Morrowind.esm")`) yields a
-/// one-plugin load order; [`BethPlugin::with_plugins`] builds the app's full load order
+/// one-plugin load order; [`TesPlugin::with_plugins`] builds the app's full load order
 /// and shares it as [`LoadOrderHandle`].
 #[derive(Asset, TypePath)]
 pub struct LoadOrderAsset {
@@ -309,7 +309,7 @@ impl AssetLoader for NifLoader {
 ///
 /// For texture-splatted terrain, also add [`TerrainPlugin`] **after** `DefaultPlugins`;
 /// without it terrain spawns vertex-tinted white.
-pub struct BethPlugin {
+pub struct TesPlugin {
     /// The Morrowind `Data Files` directory the VFS serves (loose files + `*.bsa`).
     pub data_root: PathBuf,
     /// Explicit archive load order (later archives override earlier ones). `None`
@@ -322,10 +322,10 @@ pub struct BethPlugin {
     pub plugins: Vec<PathBuf>,
 }
 
-impl BethPlugin {
+impl TesPlugin {
     /// A plugin serving `data_root` with auto-discovered archives and no load order.
     pub fn new(data_root: impl Into<PathBuf>) -> Self {
-        BethPlugin {
+        TesPlugin {
             data_root: data_root.into(),
             archives: None,
             plugins: Vec::new(),
@@ -346,18 +346,18 @@ impl BethPlugin {
     }
 }
 
-impl Default for BethPlugin {
+impl Default for TesPlugin {
     /// Serves `"data"`, the workspace's conventional game-data directory.
     fn default() -> Self {
-        BethPlugin::new("data")
+        TesPlugin::new("data")
     }
 }
 
-impl Plugin for BethPlugin {
+impl Plugin for TesPlugin {
     fn build(&self, app: &mut App) {
         assert!(
             app.world().get_resource::<AssetServer>().is_none(),
-            "BethPlugin must be added before Bevy's AssetPlugin (add it before DefaultPlugins)"
+            "TesPlugin must be added before Bevy's AssetPlugin (add it before DefaultPlugins)"
         );
 
         // FileAssetReader (which TesVfsReader delegates loose reads to) resolves relative
@@ -372,7 +372,7 @@ impl Plugin for BethPlugin {
         let vfs = Arc::new(vfs.unwrap_or_else(|e| {
             // Keep dataless apps (tests, fresh checkouts) bootable: loads just miss.
             eprintln!(
-                "bevy-beth: cannot open data root {}: {e}; `tes://` loads will find nothing",
+                "bevy-tes: cannot open data root {}: {e}; `tes://` loads will find nothing",
                 data_root.display()
             );
             TesVfs::empty()
@@ -438,7 +438,7 @@ fn init_asset_if_missing<A: bevy::asset::Asset>(app: &mut App) {
     }
 }
 
-/// Read a plain-text load-order file for [`BethPlugin::with_plugins`]: one plugin
+/// Read a plain-text load-order file for [`TesPlugin::with_plugins`]: one plugin
 /// filename per line (relative to the data root), in load order (earliest first).
 /// Blank lines and lines starting with `#` are skipped; surrounding whitespace
 /// (including `\r`) is trimmed. There is no inline-comment syntax — `#` only comments

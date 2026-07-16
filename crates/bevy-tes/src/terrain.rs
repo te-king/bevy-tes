@@ -44,7 +44,7 @@ use tes3_esm::records::land::VTEX_GRID;
 /// Vanilla cells stay well under it; overflowing texels fall back to layer 0.
 pub const MAX_TERRAIN_LAYERS: usize = 16;
 
-/// Registers the [`TerrainSplatMaterial`] render pipeline. Unlike `BethPlugin`, add this
+/// Registers the [`TerrainSplatMaterial`] render pipeline. Unlike `TesPlugin`, add this
 /// **after** `DefaultPlugins` (it needs the render app; and adding a `MaterialPlugin`
 /// from another plugin's `finish` would silently skip its own `finish`). Without it,
 /// terrain spawns with the plain vertex-tinted white material.
@@ -80,7 +80,7 @@ pub struct TerrainSplatMaterial {
 
 impl Material for TerrainSplatMaterial {
     fn fragment_shader() -> ShaderRef {
-        "embedded://bevy_beth/terrain.wgsl".into()
+        "embedded://bevy_tes/terrain.wgsl".into()
     }
 }
 

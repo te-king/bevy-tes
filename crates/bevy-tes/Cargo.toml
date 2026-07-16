@@ -1,5 +1,5 @@
 [package]
-name = "bevy-beth"
+name = "bevy-tes"
 description = "Bevy plugin loading TES3 (Morrowind) data files: plugins, BSA archives and NIF models"
 version = "0.1.0"
 edition.workspace = true
@@ -15,25 +15,15 @@ tes-nif = { workspace = true }
 bevy = { workspace = true }
 
 [features]
-default = ["scene", "render"]
+default = ["scene"]
 # NIF loads emit spawnable scenes: labeled Mesh/StandardMaterial/Image/WorldAsset
 # sub-assets. Headless-friendly — pulls bevy_pbr/bevy_world_serialization (and via them
 # mesh/image support) but NOT winit/windowing. dds+tga+bmp cover Morrowind's texture
-# formats (a handful of vanilla textures are BMPs).
+# formats (a handful of vanilla textures are BMPs). The on-screen renderer lives in the
+# viewer crates (bevy-render-cell, bevy-render-nif), which enable Bevy's render/window
+# features themselves.
 scene = ["bevy/bevy_pbr", "bevy/bevy_world_serialization", "bevy/dds", "bevy/tga", "bevy/bmp"]
-# Full renderer + windowing on top of `scene`, so scenes can be drawn on screen.
-# The `render_nif` example needs it. The camera-controller features supply the built-in
-# free camera the interactive examples fly with.
-render = ["scene", "bevy/3d", "bevy/bevy_camera_controller", "bevy/free_camera"]
 
 [dev-dependencies]
 clap = { workspace = true }
 tes-testdata = { workspace = true }
-
-[[example]]
-name = "render_nif"
-required-features = ["render"]
-
-[[example]]
-name = "render_cell"
-required-features = ["render"]

@@ -1,4 +1,4 @@
-# bevy-beth
+# bevy-tes
 
 Load The Elder Scrolls III: Morrowind data files into [Bevy](https://bevyengine.org).
 
@@ -14,10 +14,13 @@ mmap-backed), and turn `.nif` models into textured, per-shape Bevy meshes and ma
 | [`tes3-esm`](crates/tes3-esm) | tes-core | Plugin (`.esm`/`.esp`) parser — all 43 TES3 record types |
 | [`tes3-bsa`](crates/tes3-bsa) | tes-core | BSA archive reader — mmap + zero-copy file slices, indexed lookup |
 | [`tes-nif`](crates/tes-nif) | tes-core | NIF 4.0.0.2 model parser — scene graph, geometry, textures, materials |
-| [`bevy-beth`](crates/bevy-beth) | all of the above | Bevy plugin: `tes://` asset source (loose files layered over BSAs) + loaders; NIFs load as spawnable scenes |
+| [`bevy-tes`](crates/bevy-tes) | all of the above | Bevy plugin: `tes://` asset source (loose files layered over BSAs) + loaders; NIFs load as spawnable scenes |
+| [`bevy-render-cell`](crates/bevy-render-cell) | bevy-tes | Viewer binary: renders a whole cell (interior or exterior grid) to a window or PNG |
+| [`bevy-render-nif`](crates/bevy-render-nif) | bevy-tes | Viewer binary: renders a single NIF model to a window or PNG |
 
-The parser crates know nothing about Bevy; only `bevy-beth` bridges the two. Everything
-below `bevy-beth` also works standalone for tooling (see the `tes3-bsa` CLI example).
+The parser crates know nothing about Bevy; only `bevy-tes` bridges the two, and it stays
+headless — the on-screen renderer and windowing live in the two viewer binaries. Everything
+below `bevy-tes` also works standalone for tooling (see the `tes3-bsa` CLI example).
 There is also [`tes-testdata`](crates/tes-testdata), an internal (unpublished)
 dev-dependency that locates the gitignored `data/` directory for integration tests and
 encodes the skip-when-absent convention.
@@ -32,7 +35,7 @@ encodes the skip-when-absent convention.
   transparency (alpha-tested cutouts for foliage, blended and additive surfaces);
   animation/particle/skinning blocks are decoded far enough to walk past, so skinned
   and animated models yield their bind-pose geometry (no animation playback yet).
-- **Bevy** — `BethPlugin` registers the `tes://` asset source: a case-insensitive VFS
+- **Bevy** — `TesPlugin` registers the `tes://` asset source: a case-insensitive VFS
   layering loose data files over the BSA archives, exactly as the game resolves paths.
   NIF loads emit labeled `Mesh`/`StandardMaterial`/scene sub-assets (glTF-loader style),
   with textures resolved through the same VFS — so
@@ -47,15 +50,18 @@ tests pass without it.
 ```sh
 # Render a NIF to a PNG (writes the screenshot path to stdout). The model is named by
 # its game-data path and may live loose or inside a BSA archive:
-cargo run -p bevy-beth --example render_nif --features render -- \
-    meshes/i/in_de_shack_01.nif
+cargo run --release -p bevy-render-nif -- meshes/i/in_de_shack_01.nif
 
 # ...or open a live, rotating viewer:
-cargo run -p bevy-beth --example render_nif --features render -- \
-    meshes/i/in_de_shack_01.nif --interactive
+cargo run --release -p bevy-render-nif -- meshes/i/in_de_shack_01.nif --interactive
+
+# Render a whole cell — by interior name or exterior grid coordinates; pass
+# --load-order <file> to merge a multi-plugin load order (one filename per line):
+cargo run --release -p bevy-render-cell -- "Balmora, Guild of Mages"
+cargo run --release -p bevy-render-cell -- --exterior=-3,-2
 
 # Load an ESM through Bevy's AssetServer and summarize it:
-cargo run -p bevy-beth --example load_esm -- data/Morrowind.esm
+cargo run -p bevy-tes --example load_esm -- data/Morrowind.esm
 
 # Poke at archives/plugins from the command line:
 cargo run -p tes3-bsa --example cli -- bsa list data/Morrowind.bsa --limit 20
