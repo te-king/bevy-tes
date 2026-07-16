@@ -1,14 +1,15 @@
-//! Spawning cells (interiors and exterior grid squares) from a loaded ESM.
+//! Spawning cells (interiors and exterior grid squares) from a loaded load order.
 //!
-//! Spawn an entity with a [`CellSeed`] naming a cell; once the [`EsmAsset`] is loaded,
-//! [`spawn_cells`] resolves the cell record and spawns one child entity per object
-//! reference — each with the reference's placement as a Y-up [`Transform`] and, when its
-//! object's model resolves in the VFS, a [`WorldAssetRoot`] pointing at the NIF's
-//! `#Scene` sub-asset. Only the NIFs a spawned cell actually references get loaded.
+//! Spawn an entity with a [`CellSeed`] naming a cell; once the [`LoadOrderAsset`] is
+//! loaded, [`spawn_cells`] resolves the cell record and spawns one child entity per
+//! object reference — each with the reference's placement as a Y-up [`Transform`] and,
+//! when its object's model resolves in the VFS, a [`WorldAssetRoot`] pointing at the
+//! NIF's `#Scene` sub-asset. Only the NIFs a spawned cell actually references get
+//! loaded.
 //!
 //! ```ignore
 //! commands.spawn(CellSeed {
-//!     esm: asset_server.load("tes://Morrowind.esm"),
+//!     load_order: asset_server.load("tes://Morrowind.esm"),
 //!     cell: CellId::interior("Balmora, Guild of Mages"),
 //! });
 //! ```
@@ -60,7 +61,7 @@ use tes3_esm::records::ligh::LightFlags;
 
 use crate::terrain::{self, MAX_TERRAIN_LAYERS, TerrainSplatMaterial};
 use crate::tes_loadorder::{CellId, ObjectKind};
-use crate::{EsmAsset, TesVfsHandle, convert};
+use crate::{LoadOrderAsset, TesVfsHandle, convert};
 
 /// Point-light lumens per game-unit² of `LightData::radius`. A documented heuristic, not
 /// game data: Morrowind's fixed-function attenuation doesn't translate to physical
@@ -68,14 +69,14 @@ use crate::{EsmAsset, TesVfsHandle, convert};
 /// (1 m ≈ 70 units; illuminance falls with the square of the distance in units).
 const LIGHT_INTENSITY_PER_UNIT_SQ: f32 = 20_000.0;
 
-/// Asks for a cell's contents to be spawned as children of this entity, once `esm`
-/// finishes loading. One-shot: the seed entity is tagged [`CellSpawned`] (or
-/// [`CellSpawnFailed`]) afterwards. See the [module docs](self).
+/// Asks for a cell's contents to be spawned as children of this entity, once
+/// `load_order` finishes loading. One-shot: the seed entity is tagged [`CellSpawned`]
+/// (or [`CellSpawnFailed`]) afterwards. See the [module docs](self).
 #[derive(Component, Debug, Clone)]
 #[require(Transform, Visibility)]
 pub struct CellSeed {
-    /// The plugin to read the cell from.
-    pub esm: bevy::asset::Handle<EsmAsset>,
+    /// The load order to read the cell from.
+    pub load_order: bevy::asset::Handle<LoadOrderAsset>,
     /// Which cell to spawn.
     pub cell: CellId,
 }
@@ -89,8 +90,8 @@ pub struct CellSpawned {
     pub skipped: usize,
 }
 
-/// Inserted on the seed entity instead of [`CellSpawned`] when the ESM failed to load or
-/// the cell doesn't exist in it.
+/// Inserted on the seed entity instead of [`CellSpawned`] when the load order failed to
+/// load or the cell doesn't exist in it.
 #[derive(Component, Debug)]
 pub struct CellSpawnFailed(pub String);
 
@@ -136,7 +137,8 @@ type PendingSeeds<'w, 's> =
     Query<'w, 's, (Entity, &'static CellSeed), (Without<CellSpawned>, Without<CellSpawnFailed>)>;
 
 /// Resolves pending [`CellSeed`]s and spawns their cells. Registered by `BethPlugin`
-/// under the `scene` feature; polls until each seed's ESM loads, then spawns once.
+/// under the `scene` feature; polls until each seed's load order loads, then spawns
+/// once.
 ///
 /// Terrain is texture-splatted when `Assets<TerrainSplatMaterial>` exists (i.e.
 /// [`TerrainPlugin`](crate::TerrainPlugin) — or a test harness — registered it) and the
@@ -146,7 +148,7 @@ type PendingSeeds<'w, 's> =
 pub fn spawn_cells(
     mut commands: Commands,
     seeds: PendingSeeds,
-    esms: Res<Assets<EsmAsset>>,
+    load_orders: Res<Assets<LoadOrderAsset>>,
     asset_server: Res<AssetServer>,
     vfs: Res<TesVfsHandle>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -164,17 +166,23 @@ pub fn spawn_cells(
         .as_deref()
         .is_none_or(terrain::splat_supported);
     for (seed_entity, seed) in &seeds {
-        let Some(esm) = esms.get(&seed.esm) else {
-            if let bevy::asset::LoadState::Failed(e) = asset_server.load_state(&seed.esm) {
-                eprintln!("bevy-beth: ESM failed to load for {:?}: {e}", seed.cell);
+        let Some(load_order) = load_orders.get(&seed.load_order) else {
+            if let bevy::asset::LoadState::Failed(e) = asset_server.load_state(&seed.load_order) {
+                eprintln!(
+                    "bevy-beth: load order failed to load for {:?}: {e}",
+                    seed.cell
+                );
                 commands
                     .entity(seed_entity)
-                    .insert(CellSpawnFailed(format!("ESM failed to load: {e}")));
+                    .insert(CellSpawnFailed(format!("load order failed to load: {e}")));
             }
             continue; // still loading; try again next frame
         };
-        let Some(cell) = esm.cell(&seed.cell) else {
-            eprintln!("bevy-beth: cell {:?} not found in plugin", seed.cell);
+        let Some(cell) = load_order.cell(&seed.cell) else {
+            eprintln!(
+                "bevy-beth: cell {:?} not found in the load order",
+                seed.cell
+            );
             commands
                 .entity(seed_entity)
                 .insert(CellSpawnFailed(format!("no such cell: {:?}", seed.cell)));
@@ -183,7 +191,7 @@ pub fn spawn_cells(
 
         let mut spawner = CellSpawner {
             commands: &mut commands,
-            esm,
+            load_order,
             asset_server: &asset_server,
             vfs: &vfs,
             warned: &mut warned,
@@ -192,7 +200,7 @@ pub fn spawn_cells(
             skipped: 0,
             position_sum: Vec3::ZERO,
         };
-        for reference in esm.references(&seed.cell) {
+        for reference in load_order.references(&seed.cell) {
             spawner.spawn_reference(reference);
         }
         if !cell.moved_references.is_empty() {
@@ -222,7 +230,7 @@ pub fn spawn_cells(
                 &mut missing_layer,
                 &mut warned,
                 seed_entity,
-                esm,
+                load_order,
                 cell.data.grid_x,
                 cell.data.grid_y,
             )
@@ -245,7 +253,7 @@ pub fn spawn_cells(
 /// Per-cell spawn pass: walks the reference list, spawning children under the seed.
 struct CellSpawner<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
-    esm: &'a EsmAsset,
+    load_order: &'a LoadOrderAsset,
     asset_server: &'a AssetServer,
     vfs: &'a TesVfsHandle,
     /// Ids/models already warned about, shared across cells and frames.
@@ -260,7 +268,7 @@ struct CellSpawner<'a, 'w, 's> {
 impl CellSpawner<'_, '_, '_> {
     fn spawn_reference(&mut self, reference: &Reference) {
         let object_id = reference.object.decode().into_owned();
-        let Some(info) = self.esm.object(&object_id) else {
+        let Some(info) = self.load_order.object(&object_id) else {
             if self.warned.insert(object_id.clone()) {
                 eprintln!("bevy-beth: cell references unknown object id {object_id:?}");
             }
@@ -369,11 +377,11 @@ fn spawn_terrain(
     missing_layer: &mut Option<Handle<Image>>,
     warned: &mut HashSet<String>,
     seed_entity: Entity,
-    esm: &EsmAsset,
+    load_order: &LoadOrderAsset,
     grid_x: i32,
     grid_y: i32,
 ) -> Option<f32> {
-    let land = esm.land(grid_x, grid_y)?;
+    let land = load_order.land(grid_x, grid_y)?;
     let mesh = convert::land_mesh(land)?;
     let min = land
         .decode_heights()?
@@ -389,7 +397,15 @@ fn spawn_terrain(
         ChildOf(seed_entity),
     ));
     let splat = splat_materials.and_then(|splats| {
-        let material = splat_material(land, esm, asset_server, vfs, images, missing_layer, warned)?;
+        let material = splat_material(
+            land,
+            load_order,
+            asset_server,
+            vfs,
+            images,
+            missing_layer,
+            warned,
+        )?;
         Some(splats.add(material))
     });
     match splat {
@@ -425,7 +441,7 @@ fn spawn_terrain(
 /// textures (never in vanilla data) remap the overflow to layer 0.
 fn splat_material(
     land: &Land,
-    esm: &EsmAsset,
+    load_order: &LoadOrderAsset,
     asset_server: &AssetServer,
     vfs: &TesVfsHandle,
     images: &mut Assets<Image>,
@@ -443,7 +459,7 @@ fn splat_material(
                 let slot = if layers.len() < MAX_TERRAIN_LAYERS {
                     layers.push(layer_texture(
                         value,
-                        esm,
+                        load_order,
                         asset_server,
                         vfs,
                         images,
@@ -475,7 +491,7 @@ fn splat_material(
 /// shared between terrain and models isn't requested with conflicting settings.
 fn layer_texture(
     value: u16,
-    esm: &EsmAsset,
+    load_order: &LoadOrderAsset,
     asset_server: &AssetServer,
     vfs: &TesVfsHandle,
     images: &mut Assets<Image>,
@@ -486,7 +502,7 @@ fn layer_texture(
         // No explicit texture: the engine's hardcoded default.
         Cow::Borrowed("_land_default.tga")
     } else {
-        match esm.ltex(value as u32 - 1) {
+        match load_order.ltex(value as u32 - 1) {
             Some(ltex) => ltex.texture.decode(),
             None => {
                 warn_once(warned, format!("no LTEX record with index {}", value - 1));

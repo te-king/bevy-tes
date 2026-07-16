@@ -6,7 +6,7 @@
 
 use bevy::asset::{AssetServer, Assets, Handle, LoadState};
 
-use bevy_beth::{EsmAsset, NifAsset};
+use bevy_beth::{LoadOrderAsset, NifAsset};
 
 mod common;
 use common::{app_with_assets, pump_until_loaded};
@@ -15,7 +15,11 @@ use common::{app_with_assets, pump_until_loaded};
 fn plugin_registers_asset_types() {
     let app = app_with_assets();
     // `init_asset` inserts an `Assets<T>` resource for each registered asset type.
-    assert!(app.world().get_resource::<Assets<EsmAsset>>().is_some());
+    assert!(
+        app.world()
+            .get_resource::<Assets<LoadOrderAsset>>()
+            .is_some()
+    );
     assert!(app.world().get_resource::<Assets<NifAsset>>().is_some());
 }
 
@@ -26,7 +30,8 @@ fn loads_morrowind_esm_through_asset_server() {
     }
 
     let mut app = app_with_assets();
-    let handle: Handle<EsmAsset> = app.world().resource::<AssetServer>().load("Morrowind.esm");
+    let handle: Handle<LoadOrderAsset> =
+        app.world().resource::<AssetServer>().load("Morrowind.esm");
 
     let state = pump_until_loaded(&mut app, &handle);
     assert!(
@@ -34,10 +39,11 @@ fn loads_morrowind_esm_through_asset_server() {
         "unexpected load state: {state:?}"
     );
 
-    let assets = app.world().resource::<Assets<EsmAsset>>();
-    let esm = assets.get(&handle).expect("asset present once loaded");
-    assert_eq!(esm.esm().header.version, 1.2);
-    assert_eq!(esm.esm().records.len(), 48_296);
+    let assets = app.world().resource::<Assets<LoadOrderAsset>>();
+    let asset = assets.get(&handle).expect("asset present once loaded");
+    let directory = asset.load_order().esms()[0].directory();
+    assert_eq!(directory.header.version, 1.2);
+    assert_eq!(directory.records.len(), 48_296);
 }
 
 #[test]
@@ -47,7 +53,7 @@ fn loads_morrowind_esm_through_the_tes_source() {
     }
 
     let mut app = app_with_assets();
-    let handle: Handle<EsmAsset> = app
+    let handle: Handle<LoadOrderAsset> = app
         .world()
         .resource::<AssetServer>()
         .load("tes://Morrowind.esm");
@@ -58,9 +64,10 @@ fn loads_morrowind_esm_through_the_tes_source() {
         "unexpected load state: {state:?}"
     );
 
-    let assets = app.world().resource::<Assets<EsmAsset>>();
-    let esm = assets.get(&handle).expect("asset present once loaded");
-    assert_eq!(esm.esm().records.len(), 48_296);
+    let assets = app.world().resource::<Assets<LoadOrderAsset>>();
+    let asset = assets.get(&handle).expect("asset present once loaded");
+    let directory = asset.load_order().esms()[0].directory();
+    assert_eq!(directory.records.len(), 48_296);
 }
 
 #[test]

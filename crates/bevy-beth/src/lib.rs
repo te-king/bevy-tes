@@ -8,10 +8,10 @@
 //!
 //! ```no_run
 //! use bevy::prelude::*;
-//! use bevy_beth::{BethPlugin, EsmAsset, NifAsset};
+//! use bevy_beth::{BethPlugin, LoadOrderAsset, NifAsset};
 //!
 //! fn load(asset_server: Res<AssetServer>) {
-//!     let _esm: Handle<EsmAsset> = asset_server.load("tes://Morrowind.esm");
+//!     let _esm: Handle<LoadOrderAsset> = asset_server.load("tes://Morrowind.esm");
 //!     let _nif: Handle<NifAsset> = asset_server.load("tes://meshes/i/in_de_shack_01.nif");
 //! }
 //!
@@ -48,7 +48,7 @@
 //!
 //! fn spawn(mut commands: Commands, asset_server: Res<AssetServer>) {
 //!     commands.spawn(CellSeed {
-//!         esm: asset_server.load("tes://Morrowind.esm"),
+//!         load_order: asset_server.load("tes://Morrowind.esm"),
 //!         cell: CellId::interior("Balmora, Guild of Mages"),
 //!     });
 //! }
@@ -113,31 +113,32 @@ pub const TES_SOURCE: &str = "tes";
 #[derive(Resource, Clone)]
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
-/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`].
+/// A TES3 load order — one or more parsed plugins (`.esm`/`.esp`) with merged lookup
+/// tables — wrapped as a Bevy [`Asset`].
 ///
-/// It holds a [`TesLoadOrder`] — the owned plugin buffers plus lookup tables borrowing
-/// their records. Today the loader feeds it one plugin per file (so [`EsmAsset::esm`]
-/// exposes that single directory); the structure is ready for a full multi-plugin load
-/// order once plugin-list ingest lands.
+/// It holds a [`TesLoadOrder`]: the owned plugin buffers plus lookup tables borrowing
+/// their records, merged earliest-first so later plugins win on id/grid collision.
+/// Loading a plugin file directly (`asset_server.load("tes://Morrowind.esm")`) yields a
+/// one-plugin load order.
 #[derive(Asset, TypePath)]
-pub struct EsmAsset {
+pub struct LoadOrderAsset {
     load_order: TesLoadOrder,
 }
 
-impl EsmAsset {
-    /// Parse `bytes` and build the lookup tables. The bytes stay alive inside the asset;
-    /// the parsed records borrow them.
-    pub fn parse(bytes: Vec<u8>) -> Result<EsmAsset, EsmError> {
+impl LoadOrderAsset {
+    /// Parse `bytes` as a single plugin and build the lookup tables. The bytes stay
+    /// alive inside the asset; the parsed records borrow them.
+    pub fn parse(bytes: Vec<u8>) -> Result<LoadOrderAsset, EsmError> {
         let esm = Esm::parse(bytes)?;
-        Ok(EsmAsset {
+        Ok(LoadOrderAsset {
             load_order: TesLoadOrder::from_esms(vec![esm]),
         })
     }
 
     /// Wrap an in-memory [`EsmDirectory<'static>`] (e.g. a synthetic test plugin built
     /// from `&'static` literals) without a backing buffer.
-    pub fn from_static(directory: EsmDirectory<'static>) -> EsmAsset {
-        EsmAsset {
+    pub fn from_static(directory: EsmDirectory<'static>) -> LoadOrderAsset {
+        LoadOrderAsset {
             load_order: TesLoadOrder::from_esms(vec![Esm::from_static(directory)]),
         }
     }
@@ -145,13 +146,6 @@ impl EsmAsset {
     /// The load order backing this asset.
     pub fn load_order(&self) -> &TesLoadOrder {
         &self.load_order
-    }
-
-    /// The (single) plugin's parsed directory: header plus all records in file order.
-    ///
-    /// A temporary single-plugin accessor — it names the first plugin in the load order.
-    pub fn esm(&self) -> &EsmDirectory<'_> {
-        self.load_order.esms()[0].directory()
     }
 
     /// Look up a placeable object by editor id (any case).
@@ -184,9 +178,9 @@ impl EsmAsset {
 }
 
 // Manual: the owned plugin buffers must not leak into the asset's Debug output.
-impl std::fmt::Debug for EsmAsset {
+impl std::fmt::Debug for LoadOrderAsset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EsmAsset")
+        f.debug_struct("LoadOrderAsset")
             .field("load_order", &self.load_order)
             .finish()
     }
@@ -213,12 +207,12 @@ pub struct NifAsset {
     pub materials: Vec<bevy::asset::Handle<bevy::pbr::StandardMaterial>>,
 }
 
-/// Loads `.esm`/`.esp` files into [`EsmAsset`].
+/// Loads a single `.esm`/`.esp` file into a one-plugin [`LoadOrderAsset`].
 #[derive(Default, TypePath)]
 struct EsmLoader;
 
 impl AssetLoader for EsmLoader {
-    type Asset = EsmAsset;
+    type Asset = LoadOrderAsset;
     type Settings = ();
     type Error = EsmError;
 
@@ -227,10 +221,10 @@ impl AssetLoader for EsmLoader {
         reader: &mut dyn Reader,
         _settings: &(),
         _load_context: &mut LoadContext<'_>,
-    ) -> Result<EsmAsset, EsmError> {
+    ) -> Result<LoadOrderAsset, EsmError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.map_err(EsmError::Io)?;
-        EsmAsset::parse(bytes)
+        LoadOrderAsset::parse(bytes)
     }
 
     fn extensions(&self) -> &[&str] {
@@ -358,7 +352,7 @@ impl Plugin for BethPlugin {
     // built — hence the build/finish split (asset sources before, loaders after).
     fn finish(&self, app: &mut App) {
         let vfs = app.world().resource::<TesVfsHandle>().0.clone();
-        app.init_asset::<EsmAsset>()
+        app.init_asset::<LoadOrderAsset>()
             .init_asset::<NifAsset>()
             .init_asset_loader::<EsmLoader>()
             .register_asset_loader(NifLoader { vfs });

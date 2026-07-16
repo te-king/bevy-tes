@@ -155,7 +155,7 @@ fn main() -> ExitCode {
             Startup,
             move |mut commands: Commands, asset_server: Res<AssetServer>| {
                 commands.spawn(CellSeed {
-                    esm: asset_server.load(format!("tes://{esm_path}")),
+                    load_order: asset_server.load(format!("tes://{esm_path}")),
                     cell: cell.clone(),
                 });
             },

@@ -27,7 +27,7 @@ use bevy::asset::{AssetPlugin, AssetServer, Assets, Handle, LoadState};
 use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
 use clap::Parser;
 
-use bevy_beth::{BethPlugin, EsmAsset};
+use bevy_beth::{BethPlugin, LoadOrderAsset};
 use tes3_esm::records::tes3::HeaderFlags;
 
 /// Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` and print a summary.
@@ -86,7 +86,7 @@ fn main() -> ExitCode {
     // Headless apps must finish() themselves for loader registration to run.
     app.finish();
 
-    let handle: Handle<EsmAsset> = app
+    let handle: Handle<LoadOrderAsset> = app
         .world()
         .resource::<AssetServer>()
         .load(file_name.to_string());
@@ -114,14 +114,15 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let assets = app.world().resource::<Assets<EsmAsset>>();
+    let assets = app.world().resource::<Assets<LoadOrderAsset>>();
     let plugin = assets.get(&handle).expect("asset present once loaded");
     print_summary(&path.display().to_string(), plugin);
     ExitCode::SUCCESS
 }
 
-fn print_summary(path: &str, asset: &EsmAsset) {
-    let h = &asset.esm().header;
+fn print_summary(path: &str, asset: &LoadOrderAsset) {
+    let directory = asset.load_order().esms()[0].directory();
+    let h = &directory.header;
     println!("Loaded {path} via Bevy AssetServer");
     println!("  version:          {}", h.version);
     println!(
@@ -137,9 +138,9 @@ fn print_summary(path: &str, asset: &EsmAsset) {
         }
     }
 
-    println!("  parsed records:   {}", asset.esm().records.len());
+    println!("  parsed records:   {}", directory.records.len());
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for record in &asset.esm().records {
+    for record in &directory.records {
         *counts.entry(record.tag().to_string()).or_default() += 1;
     }
     let mut by_count: Vec<_> = counts.iter().collect();
