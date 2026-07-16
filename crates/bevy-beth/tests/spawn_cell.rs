@@ -21,7 +21,7 @@ use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags, VTEX_GRI
 use tes3_esm::records::ligh::{Ligh, LightData};
 use tes3_esm::records::ltex::Ltex;
 use tes3_esm::records::stat::Stat;
-use tes3_esm::{EsmDirectory, L1Str, Record};
+use tes3_esm::{Esm, EsmDirectory, L1Str, Record};
 
 use bevy_beth::{
     CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
@@ -180,6 +180,76 @@ fn synthetic_cell_spawns_and_skips() {
     let (_, water_transform, parent) = water.iter(app.world()).next().expect("water plane");
     assert_eq!(parent.parent(), seed);
     assert_eq!(water_transform.translation.y, 50.0);
+}
+
+#[test]
+fn later_plugin_overrides_cell() {
+    // The base plugin defines the object and a one-reference "Test Cell"; the override
+    // plugin redefines the same cell with two references. Exactly what BethPlugin's
+    // plugin-list ingest produces — the later CELL record must win, while the base
+    // plugin's STAT stays resolvable through the merged object table.
+    let base = EsmDirectory {
+        header: Default::default(),
+        records: vec![
+            Record::Stat(Stat {
+                id: l1("test_stat"),
+                model: l1(r"x\nowhere.nif"),
+            }),
+            Record::Cell(Cell {
+                name: l1("Test Cell"),
+                data: CellData {
+                    flags: CellFlags::INTERIOR,
+                    ..Default::default()
+                },
+                references: vec![reference(1, "test_stat", None)],
+                ..Default::default()
+            }),
+        ],
+    };
+    let override_ = EsmDirectory {
+        header: Default::default(),
+        records: vec![Record::Cell(Cell {
+            name: l1("Test Cell"),
+            data: CellData {
+                flags: CellFlags::INTERIOR,
+                ..Default::default()
+            },
+            references: vec![
+                reference(1, "test_stat", None),
+                reference(2, "test_stat", None),
+            ],
+            ..Default::default()
+        })],
+    };
+
+    let mut app = app_with_assets();
+    let handle = app
+        .world_mut()
+        .resource_mut::<Assets<LoadOrderAsset>>()
+        .add(LoadOrderAsset::from_esms(vec![
+            Esm::from_static(base),
+            Esm::from_static(override_),
+        ]));
+
+    let seed = app
+        .world_mut()
+        .spawn(CellSeed {
+            load_order: handle,
+            cell: CellId::interior("Test Cell"),
+        })
+        .id();
+    pump_until_settled(&mut app, seed);
+
+    let spawned = app
+        .world()
+        .entity(seed)
+        .get::<CellSpawned>()
+        .expect("seed resolved");
+    assert_eq!(
+        (spawned.spawned, spawned.skipped),
+        (2, 0),
+        "the later plugin's two-reference cell won"
+    );
 }
 
 /// Re-swizzle a logical row-major 16×16 grid (south-west origin) into `VTEX` storage

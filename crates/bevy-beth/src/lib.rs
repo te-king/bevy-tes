@@ -39,8 +39,14 @@
 //! }
 //! ```
 //!
+//! A full **load order** — several plugins merged so later ones override earlier — is
+//! configured on the plugin itself:
+//! `BethPlugin::new("data").with_plugins(["Morrowind.esm", "Tribunal.esm"])` parses the
+//! listed files during startup and shares the result as the [`LoadOrderHandle`]
+//! resource.
+//!
 //! Whole **cells** (interiors or exterior grid squares) spawn the same way from a loaded
-//! plugin — one child entity per placed object, each loading its own NIF scene (see
+//! load order — one child entity per placed object, each loading its own NIF scene (see
 //! [`cell`]):
 //!
 //! ```ignore
@@ -66,7 +72,7 @@ use std::sync::Arc;
 
 use bevy::app::{App, Plugin};
 use bevy::asset::io::{AssetSourceBuilder, AssetSourceId, Reader};
-use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, Assets, LoadContext};
+use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, Assets, Handle, LoadContext};
 use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
@@ -113,13 +119,21 @@ pub const TES_SOURCE: &str = "tes";
 #[derive(Resource, Clone)]
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
+/// The app's load order, inserted by [`BethPlugin`] when it was given a plugin list
+/// (see [`BethPlugin::with_plugins`]); absent when the list is empty. The handle starts
+/// loading during plugin finish — poll [`AssetServer::load_state`], or just seed a
+/// [`CellSeed`](cell::CellSeed) with it and let `spawn_cells` wait.
+#[derive(Resource, Clone, Debug)]
+pub struct LoadOrderHandle(pub Handle<LoadOrderAsset>);
+
 /// A TES3 load order — one or more parsed plugins (`.esm`/`.esp`) with merged lookup
 /// tables — wrapped as a Bevy [`Asset`].
 ///
 /// It holds a [`TesLoadOrder`]: the owned plugin buffers plus lookup tables borrowing
 /// their records, merged earliest-first so later plugins win on id/grid collision.
 /// Loading a plugin file directly (`asset_server.load("tes://Morrowind.esm")`) yields a
-/// one-plugin load order.
+/// one-plugin load order; [`BethPlugin::with_plugins`] builds the app's full load order
+/// and shares it as [`LoadOrderHandle`].
 #[derive(Asset, TypePath)]
 pub struct LoadOrderAsset {
     load_order: TesLoadOrder,
@@ -135,12 +149,18 @@ impl LoadOrderAsset {
         })
     }
 
+    /// Build a load order from already-parsed plugins, earliest first (later plugins
+    /// override earlier ones on id/grid collision).
+    pub fn from_esms(esms: Vec<Esm>) -> LoadOrderAsset {
+        LoadOrderAsset {
+            load_order: TesLoadOrder::from_esms(esms),
+        }
+    }
+
     /// Wrap an in-memory [`EsmDirectory<'static>`] (e.g. a synthetic test plugin built
     /// from `&'static` literals) without a backing buffer.
     pub fn from_static(directory: EsmDirectory<'static>) -> LoadOrderAsset {
-        LoadOrderAsset {
-            load_order: TesLoadOrder::from_esms(vec![Esm::from_static(directory)]),
-        }
+        LoadOrderAsset::from_esms(vec![Esm::from_static(directory)])
     }
 
     /// The load order backing this asset.
@@ -296,15 +316,32 @@ pub struct BethPlugin {
     /// discovers `*.bsa` at the root ordered by modification time, which reproduces the
     /// vanilla game's effective order.
     pub archives: Option<Vec<PathBuf>>,
+    /// Plugin files to parse into the app's load order, as paths relative to
+    /// `data_root`, earliest first (later plugins override earlier ones). Empty: no
+    /// [`LoadOrderHandle`] is inserted.
+    pub plugins: Vec<PathBuf>,
 }
 
 impl BethPlugin {
-    /// A plugin serving `data_root` with auto-discovered archives.
+    /// A plugin serving `data_root` with auto-discovered archives and no load order.
     pub fn new(data_root: impl Into<PathBuf>) -> Self {
         BethPlugin {
             data_root: data_root.into(),
             archives: None,
+            plugins: Vec::new(),
         }
+    }
+
+    /// Builder: set the plugin load order (earliest first), enabling [`LoadOrderHandle`].
+    pub fn with_plugins(mut self, plugins: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
+        self.plugins = plugins.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// `data_root` absolutized, so `build`'s VFS/reader and `finish`'s plugin reads all
+    /// resolve against one tree regardless of Bevy's base-path rules.
+    fn absolute_data_root(&self) -> PathBuf {
+        std::path::absolute(&self.data_root).unwrap_or_else(|_| self.data_root.clone())
     }
 }
 
@@ -325,8 +362,7 @@ impl Plugin for BethPlugin {
         // FileAssetReader (which TesVfsReader delegates loose reads to) resolves relative
         // roots against Bevy's base path — the executable's directory — not the working
         // directory. Absolutize once so the reader and the VFS index agree on one tree.
-        let data_root =
-            std::path::absolute(&self.data_root).unwrap_or_else(|_| self.data_root.clone());
+        let data_root = self.absolute_data_root();
 
         let vfs = match &self.archives {
             Some(list) => TesVfs::new(&data_root, list),
@@ -356,6 +392,28 @@ impl Plugin for BethPlugin {
             .init_asset::<NifAsset>()
             .init_asset_loader::<EsmLoader>()
             .register_asset_loader(NifLoader { vfs });
+        if !self.plugins.is_empty() {
+            let data_root = self.absolute_data_root();
+            let paths: Vec<PathBuf> = self.plugins.iter().map(|p| data_root.join(p)).collect();
+            // Plugins are always loose files (never inside BSAs), so plain fs reads
+            // against the absolutized root are correct. add_async drives the handle
+            // through the regular Loaded/Failed states, so consumers can't tell it
+            // apart from a path load.
+            let handle = app.world().resource::<AssetServer>().add_async(async move {
+                let mut esms = Vec::with_capacity(paths.len());
+                for path in &paths {
+                    let bytes = std::fs::read(path).map_err(|e| {
+                        EsmError::Io(std::io::Error::new(
+                            e.kind(),
+                            format!("{}: {e}", path.display()),
+                        ))
+                    })?;
+                    esms.push(Esm::parse(bytes)?);
+                }
+                Ok::<LoadOrderAsset, EsmError>(LoadOrderAsset::from_esms(esms))
+            });
+            app.insert_resource(LoadOrderHandle(handle));
+        }
         #[cfg(feature = "scene")]
         {
             // The scene pipeline emits these asset types and `spawn_cells` borrows two of
