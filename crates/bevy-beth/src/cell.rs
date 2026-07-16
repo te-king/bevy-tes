@@ -192,7 +192,7 @@ pub fn spawn_cells(
             skipped: 0,
             position_sum: Vec3::ZERO,
         };
-        for reference in &cell.references {
+        for reference in esm.references(&seed.cell) {
             spawner.spawn_reference(reference);
         }
         if !cell.moved_references.is_empty() {

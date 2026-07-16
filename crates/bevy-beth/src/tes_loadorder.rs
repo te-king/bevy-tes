@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use self_cell::self_cell;
 use tes_core::{L1Str, TesId, TesPath};
-use tes3_esm::records::cell::{Cell, CellFlags};
+use tes3_esm::records::cell::{Cell, CellFlags, Reference};
 use tes3_esm::records::land::Land;
 use tes3_esm::records::ligh::LightData;
 use tes3_esm::records::ltex::Ltex;
@@ -237,6 +237,19 @@ impl TesLoadOrder {
         }
     }
 
+    /// The placed references for a cell, in authored order. Empty for unknown cells.
+    ///
+    /// Consumers should iterate this rather than reaching into [`Cell::references`]:
+    /// once exterior-reference accumulation across plugins lands (`MVRF`/`MOVE`), a
+    /// grid's references will merge from several `CELL` records, and only this accessor
+    /// will reflect that.
+    pub fn references<'s>(&'s self, id: &CellId) -> impl Iterator<Item = &'s Reference<'s>> {
+        self.cell(id)
+            .map(|cell| cell.references.iter())
+            .into_iter()
+            .flatten()
+    }
+
     /// Look up an exterior cell's `LAND` record by grid coordinates.
     pub fn land(&self, x: i32, y: i32) -> Option<&Land<'_>> {
         self.table().lands.get(&(x, y)).copied()
@@ -373,6 +386,11 @@ mod tests {
                         flags: CellFlags::INTERIOR,
                         ..Default::default()
                     },
+                    references: vec![Reference {
+                        id: 1,
+                        object: l1("T_Stat"),
+                        ..Default::default()
+                    }],
                     ..Default::default()
                 }),
                 Record::Cell(Cell {
@@ -446,6 +464,18 @@ mod tests {
 
         assert!(order.cell(&CellId::interior("nowhere")).is_none());
         assert!(order.cell(&CellId::exterior(99, 99)).is_none());
+    }
+
+    #[test]
+    fn references_iterate_through_the_table() {
+        let order = synthetic_order();
+
+        let refs: Vec<_> = order.references(&CellId::interior("tEsT cElL")).collect();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].object.decode(), "T_Stat");
+
+        assert_eq!(order.references(&CellId::interior("nowhere")).count(), 0);
+        assert_eq!(order.references(&CellId::exterior(99, 99)).count(), 0);
     }
 
     #[test]

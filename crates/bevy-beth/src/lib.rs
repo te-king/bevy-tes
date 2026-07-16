@@ -71,7 +71,7 @@ use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
 use tes_nif::{Nif, NifError};
-use tes3_esm::records::cell::Cell;
+use tes3_esm::records::cell::{Cell, Reference};
 use tes3_esm::records::land::Land;
 use tes3_esm::records::ltex::Ltex;
 use tes3_esm::{Esm, EsmDirectory, EsmError};
@@ -162,6 +162,13 @@ impl EsmAsset {
     /// Look up a cell record by id (interior names match case-insensitively).
     pub fn cell(&self, id: &CellId) -> Option<&Cell<'_>> {
         self.load_order.cell(id)
+    }
+
+    /// The placed references for a cell, in authored order — see
+    /// [`TesLoadOrder::references`] for why this beats reaching into
+    /// [`Cell::references`].
+    pub fn references<'s>(&'s self, id: &CellId) -> impl Iterator<Item = &'s Reference<'s>> {
+        self.load_order.references(id)
     }
 
     /// Look up an exterior cell's `LAND` record by grid coordinates.
