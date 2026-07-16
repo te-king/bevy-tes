@@ -13,13 +13,18 @@ use bevy_beth::BethPlugin;
 /// asset root relative to `CARGO_MANIFEST_DIR` (this crate) when run under cargo, and
 /// `BethPlugin`'s VFS resolves against the process working directory — the same place
 /// under cargo.
-const DATA_ROOT: &str = "../../data";
+pub const DATA_ROOT: &str = "../../data";
+
+/// [`app_with`] on a default `BethPlugin` serving [`DATA_ROOT`].
+pub fn app_with_assets() -> App {
+    app_with(BethPlugin::new(DATA_ROOT))
+}
 
 /// A headless app with just enough asset machinery for the loaders under test: the
 /// plugins register the `tes://` source and the ESM/NIF loaders; under the `scene`
 /// feature, manual registrations stand in for the render plugins that would normally own
 /// the `Image`/`Mesh`/material/scene asset types.
-pub fn app_with_assets() -> App {
+pub fn app_with(beth: BethPlugin) -> App {
     // Asset loading runs on Bevy's task pools, which `DefaultPlugins` would set up. A
     // headless test must initialize them itself.
     IoTaskPool::get_or_init(Default::default);
@@ -29,7 +34,7 @@ pub fn app_with_assets() -> App {
     let mut app = App::new();
     app.add_plugins((
         // BethPlugin must precede AssetPlugin: asset sources register before the server.
-        BethPlugin::new(DATA_ROOT),
+        beth,
         AssetPlugin {
             file_path: DATA_ROOT.to_string(),
             ..Default::default()

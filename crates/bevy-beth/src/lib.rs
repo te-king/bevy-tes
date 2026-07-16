@@ -8,10 +8,10 @@
 //!
 //! ```no_run
 //! use bevy::prelude::*;
-//! use bevy_beth::{BethPlugin, EsmAsset, NifAsset};
+//! use bevy_beth::{BethPlugin, LoadOrderAsset, NifAsset};
 //!
 //! fn load(asset_server: Res<AssetServer>) {
-//!     let _esm: Handle<EsmAsset> = asset_server.load("tes://Morrowind.esm");
+//!     let _esm: Handle<LoadOrderAsset> = asset_server.load("tes://Morrowind.esm");
 //!     let _nif: Handle<NifAsset> = asset_server.load("tes://meshes/i/in_de_shack_01.nif");
 //! }
 //!
@@ -39,8 +39,14 @@
 //! }
 //! ```
 //!
+//! A full **load order** — several plugins merged so later ones override earlier — is
+//! configured on the plugin itself:
+//! `BethPlugin::new("data").with_plugins(["Morrowind.esm", "Tribunal.esm"])` parses the
+//! listed files during startup and shares the result as the [`LoadOrderHandle`]
+//! resource ([`read_load_order`] fills the list from a plain-text file).
+//!
 //! Whole **cells** (interiors or exterior grid squares) spawn the same way from a loaded
-//! plugin — one child entity per placed object, each loading its own NIF scene (see
+//! load order — one child entity per placed object, each loading its own NIF scene (see
 //! [`cell`]):
 //!
 //! ```ignore
@@ -48,7 +54,7 @@
 //!
 //! fn spawn(mut commands: Commands, asset_server: Res<AssetServer>) {
 //!     commands.spawn(CellSeed {
-//!         esm: asset_server.load("tes://Morrowind.esm"),
+//!         load_order: asset_server.load("tes://Morrowind.esm"),
 //!         cell: CellId::interior("Balmora, Guild of Mages"),
 //!     });
 //! }
@@ -66,7 +72,7 @@ use std::sync::Arc;
 
 use bevy::app::{App, Plugin};
 use bevy::asset::io::{AssetSourceBuilder, AssetSourceId, Reader};
-use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, Assets, LoadContext};
+use bevy::asset::{Asset, AssetApp, AssetLoader, AssetServer, Assets, Handle, LoadContext};
 use bevy::ecs::resource::Resource;
 use bevy::reflect::TypePath;
 
@@ -113,45 +119,53 @@ pub const TES_SOURCE: &str = "tes";
 #[derive(Resource, Clone)]
 pub struct TesVfsHandle(pub Arc<TesVfs>);
 
-/// A parsed TES3 plugin (`.esm`/`.esp`) wrapped as a Bevy [`Asset`].
+/// The app's load order, inserted by [`BethPlugin`] when it was given a plugin list
+/// (see [`BethPlugin::with_plugins`]); absent when the list is empty. The handle starts
+/// loading during plugin finish — poll [`AssetServer::load_state`], or just seed a
+/// [`CellSeed`](cell::CellSeed) with it and let `spawn_cells` wait.
+#[derive(Resource, Clone, Debug)]
+pub struct LoadOrderHandle(pub Handle<LoadOrderAsset>);
+
+/// A TES3 load order — one or more parsed plugins (`.esm`/`.esp`) with merged lookup
+/// tables — wrapped as a Bevy [`Asset`].
 ///
-/// It holds a [`TesLoadOrder`] — the owned plugin buffers plus lookup tables borrowing
-/// their records. Today the loader feeds it one plugin per file (so [`EsmAsset::esm`]
-/// exposes that single directory); the structure is ready for a full multi-plugin load
-/// order once plugin-list ingest lands.
+/// It holds a [`TesLoadOrder`]: the owned plugin buffers plus lookup tables borrowing
+/// their records, merged earliest-first so later plugins win on id/grid collision.
+/// Loading a plugin file directly (`asset_server.load("tes://Morrowind.esm")`) yields a
+/// one-plugin load order; [`BethPlugin::with_plugins`] builds the app's full load order
+/// and shares it as [`LoadOrderHandle`].
 #[derive(Asset, TypePath)]
-pub struct EsmAsset {
+pub struct LoadOrderAsset {
     load_order: TesLoadOrder,
 }
 
-impl EsmAsset {
-    /// Parse `bytes` and build the lookup tables. The bytes stay alive inside the asset;
-    /// the parsed records borrow them.
-    pub fn parse(bytes: Vec<u8>) -> Result<EsmAsset, EsmError> {
+impl LoadOrderAsset {
+    /// Parse `bytes` as a single plugin and build the lookup tables. The bytes stay
+    /// alive inside the asset; the parsed records borrow them.
+    pub fn parse(bytes: Vec<u8>) -> Result<LoadOrderAsset, EsmError> {
         let esm = Esm::parse(bytes)?;
-        Ok(EsmAsset {
+        Ok(LoadOrderAsset {
             load_order: TesLoadOrder::from_esms(vec![esm]),
         })
     }
 
+    /// Build a load order from already-parsed plugins, earliest first (later plugins
+    /// override earlier ones on id/grid collision).
+    pub fn from_esms(esms: Vec<Esm>) -> LoadOrderAsset {
+        LoadOrderAsset {
+            load_order: TesLoadOrder::from_esms(esms),
+        }
+    }
+
     /// Wrap an in-memory [`EsmDirectory<'static>`] (e.g. a synthetic test plugin built
     /// from `&'static` literals) without a backing buffer.
-    pub fn from_static(directory: EsmDirectory<'static>) -> EsmAsset {
-        EsmAsset {
-            load_order: TesLoadOrder::from_esms(vec![Esm::from_static(directory)]),
-        }
+    pub fn from_static(directory: EsmDirectory<'static>) -> LoadOrderAsset {
+        LoadOrderAsset::from_esms(vec![Esm::from_static(directory)])
     }
 
     /// The load order backing this asset.
     pub fn load_order(&self) -> &TesLoadOrder {
         &self.load_order
-    }
-
-    /// The (single) plugin's parsed directory: header plus all records in file order.
-    ///
-    /// A temporary single-plugin accessor — it names the first plugin in the load order.
-    pub fn esm(&self) -> &EsmDirectory<'_> {
-        self.load_order.esms()[0].directory()
     }
 
     /// Look up a placeable object by editor id (any case).
@@ -184,9 +198,9 @@ impl EsmAsset {
 }
 
 // Manual: the owned plugin buffers must not leak into the asset's Debug output.
-impl std::fmt::Debug for EsmAsset {
+impl std::fmt::Debug for LoadOrderAsset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EsmAsset")
+        f.debug_struct("LoadOrderAsset")
             .field("load_order", &self.load_order)
             .finish()
     }
@@ -213,12 +227,12 @@ pub struct NifAsset {
     pub materials: Vec<bevy::asset::Handle<bevy::pbr::StandardMaterial>>,
 }
 
-/// Loads `.esm`/`.esp` files into [`EsmAsset`].
+/// Loads a single `.esm`/`.esp` file into a one-plugin [`LoadOrderAsset`].
 #[derive(Default, TypePath)]
 struct EsmLoader;
 
 impl AssetLoader for EsmLoader {
-    type Asset = EsmAsset;
+    type Asset = LoadOrderAsset;
     type Settings = ();
     type Error = EsmError;
 
@@ -227,10 +241,10 @@ impl AssetLoader for EsmLoader {
         reader: &mut dyn Reader,
         _settings: &(),
         _load_context: &mut LoadContext<'_>,
-    ) -> Result<EsmAsset, EsmError> {
+    ) -> Result<LoadOrderAsset, EsmError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.map_err(EsmError::Io)?;
-        EsmAsset::parse(bytes)
+        LoadOrderAsset::parse(bytes)
     }
 
     fn extensions(&self) -> &[&str] {
@@ -302,15 +316,33 @@ pub struct BethPlugin {
     /// discovers `*.bsa` at the root ordered by modification time, which reproduces the
     /// vanilla game's effective order.
     pub archives: Option<Vec<PathBuf>>,
+    /// Plugin files to parse into the app's load order, as paths relative to
+    /// `data_root`, earliest first (later plugins override earlier ones). Empty: no
+    /// [`LoadOrderHandle`] is inserted.
+    pub plugins: Vec<PathBuf>,
 }
 
 impl BethPlugin {
-    /// A plugin serving `data_root` with auto-discovered archives.
+    /// A plugin serving `data_root` with auto-discovered archives and no load order.
     pub fn new(data_root: impl Into<PathBuf>) -> Self {
         BethPlugin {
             data_root: data_root.into(),
             archives: None,
+            plugins: Vec::new(),
         }
+    }
+
+    /// Builder: set the plugin load order (earliest first), enabling [`LoadOrderHandle`].
+    /// See [`read_load_order`] for filling the list from a plain-text file.
+    pub fn with_plugins(mut self, plugins: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
+        self.plugins = plugins.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// `data_root` absolutized, so `build`'s VFS/reader and `finish`'s plugin reads all
+    /// resolve against one tree regardless of Bevy's base-path rules.
+    fn absolute_data_root(&self) -> PathBuf {
+        std::path::absolute(&self.data_root).unwrap_or_else(|_| self.data_root.clone())
     }
 }
 
@@ -331,8 +363,7 @@ impl Plugin for BethPlugin {
         // FileAssetReader (which TesVfsReader delegates loose reads to) resolves relative
         // roots against Bevy's base path — the executable's directory — not the working
         // directory. Absolutize once so the reader and the VFS index agree on one tree.
-        let data_root =
-            std::path::absolute(&self.data_root).unwrap_or_else(|_| self.data_root.clone());
+        let data_root = self.absolute_data_root();
 
         let vfs = match &self.archives {
             Some(list) => TesVfs::new(&data_root, list),
@@ -358,10 +389,32 @@ impl Plugin for BethPlugin {
     // built — hence the build/finish split (asset sources before, loaders after).
     fn finish(&self, app: &mut App) {
         let vfs = app.world().resource::<TesVfsHandle>().0.clone();
-        app.init_asset::<EsmAsset>()
+        app.init_asset::<LoadOrderAsset>()
             .init_asset::<NifAsset>()
             .init_asset_loader::<EsmLoader>()
             .register_asset_loader(NifLoader { vfs });
+        if !self.plugins.is_empty() {
+            let data_root = self.absolute_data_root();
+            let paths: Vec<PathBuf> = self.plugins.iter().map(|p| data_root.join(p)).collect();
+            // Plugins are always loose files (never inside BSAs), so plain fs reads
+            // against the absolutized root are correct. add_async drives the handle
+            // through the regular Loaded/Failed states, so consumers can't tell it
+            // apart from a path load.
+            let handle = app.world().resource::<AssetServer>().add_async(async move {
+                let mut esms = Vec::with_capacity(paths.len());
+                for path in &paths {
+                    let bytes = std::fs::read(path).map_err(|e| {
+                        EsmError::Io(std::io::Error::new(
+                            e.kind(),
+                            format!("{}: {e}", path.display()),
+                        ))
+                    })?;
+                    esms.push(Esm::parse(bytes)?);
+                }
+                Ok::<LoadOrderAsset, EsmError>(LoadOrderAsset::from_esms(esms))
+            });
+            app.insert_resource(LoadOrderHandle(handle));
+        }
         #[cfg(feature = "scene")]
         {
             // The scene pipeline emits these asset types and `spawn_cells` borrows two of
@@ -382,5 +435,62 @@ impl Plugin for BethPlugin {
 fn init_asset_if_missing<A: bevy::asset::Asset>(app: &mut App) {
     if !app.world().contains_resource::<Assets<A>>() {
         app.init_asset::<A>();
+    }
+}
+
+/// Read a plain-text load-order file for [`BethPlugin::with_plugins`]: one plugin
+/// filename per line (relative to the data root), in load order (earliest first).
+/// Blank lines and lines starting with `#` are skipped; surrounding whitespace
+/// (including `\r`) is trimmed. There is no inline-comment syntax — `#` only comments
+/// out whole lines.
+pub fn read_load_order(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<PathBuf>> {
+    Ok(parse_load_order(&std::fs::read_to_string(path)?))
+}
+
+fn parse_load_order(text: &str) -> Vec<PathBuf> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(PathBuf::from)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_load_order;
+    use std::path::PathBuf;
+
+    fn paths(names: &[&str]) -> Vec<PathBuf> {
+        names.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn parses_plugins_in_authored_order() {
+        assert_eq!(
+            parse_load_order("Morrowind.esm\nTribunal.esm\nBloodmoon.esm\n"),
+            paths(&["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"])
+        );
+    }
+
+    #[test]
+    fn skips_comments_and_blank_lines() {
+        assert_eq!(
+            parse_load_order("# masters\n\nMorrowind.esm\n  # indented comment\n\nMod.esp\n"),
+            paths(&["Morrowind.esm", "Mod.esp"])
+        );
+    }
+
+    #[test]
+    fn trims_whitespace_and_crlf() {
+        assert_eq!(
+            parse_load_order("  Morrowind.esm \r\nTribunal.esm\r\n"),
+            paths(&["Morrowind.esm", "Tribunal.esm"])
+        );
+    }
+
+    #[test]
+    fn empty_input_yields_no_plugins() {
+        assert!(parse_load_order("").is_empty());
+        assert!(parse_load_order("\n# only a comment\n").is_empty());
     }
 }

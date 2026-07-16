@@ -21,11 +21,11 @@ use tes3_esm::records::land::{HEIGHT_SCALE, LAND_GRID, Land, LandFlags, VTEX_GRI
 use tes3_esm::records::ligh::{Ligh, LightData};
 use tes3_esm::records::ltex::Ltex;
 use tes3_esm::records::stat::Stat;
-use tes3_esm::{EsmDirectory, L1Str, Record};
+use tes3_esm::{Esm, EsmDirectory, L1Str, Record};
 
 use bevy_beth::{
     CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
-    EsmAsset, TerrainSplatMaterial,
+    LoadOrderAsset, TerrainSplatMaterial,
 };
 
 mod common;
@@ -51,7 +51,7 @@ fn reference(
 /// A plugin with one interior cell exercising every spawn rule: a placed static (whose
 /// model doesn't exist in any VFS), a model-less light, a creature (skipped), a disabled
 /// static (skipped), an unknown id (skipped) — plus water.
-fn synthetic_asset() -> EsmAsset {
+fn synthetic_asset() -> LoadOrderAsset {
     let esm = EsmDirectory {
         header: Default::default(),
         records: vec![
@@ -101,7 +101,7 @@ fn synthetic_asset() -> EsmAsset {
             }),
         ],
     };
-    EsmAsset::from_static(esm)
+    LoadOrderAsset::from_static(esm)
 }
 
 /// Pump the app until the seed resolves (spawned or failed), up to a frame budget.
@@ -125,13 +125,13 @@ fn synthetic_cell_spawns_and_skips() {
     let mut app = app_with_assets();
     let handle = app
         .world_mut()
-        .resource_mut::<Assets<EsmAsset>>()
+        .resource_mut::<Assets<LoadOrderAsset>>()
         .add(synthetic_asset());
 
     let seed = app
         .world_mut()
         .spawn(CellSeed {
-            esm: handle,
+            load_order: handle,
             cell: CellId::interior("tEsT cElL"), // matching is case-insensitive
         })
         .id();
@@ -182,6 +182,76 @@ fn synthetic_cell_spawns_and_skips() {
     assert_eq!(water_transform.translation.y, 50.0);
 }
 
+#[test]
+fn later_plugin_overrides_cell() {
+    // The base plugin defines the object and a one-reference "Test Cell"; the override
+    // plugin redefines the same cell with two references. Exactly what BethPlugin's
+    // plugin-list ingest produces — the later CELL record must win, while the base
+    // plugin's STAT stays resolvable through the merged object table.
+    let base = EsmDirectory {
+        header: Default::default(),
+        records: vec![
+            Record::Stat(Stat {
+                id: l1("test_stat"),
+                model: l1(r"x\nowhere.nif"),
+            }),
+            Record::Cell(Cell {
+                name: l1("Test Cell"),
+                data: CellData {
+                    flags: CellFlags::INTERIOR,
+                    ..Default::default()
+                },
+                references: vec![reference(1, "test_stat", None)],
+                ..Default::default()
+            }),
+        ],
+    };
+    let override_ = EsmDirectory {
+        header: Default::default(),
+        records: vec![Record::Cell(Cell {
+            name: l1("Test Cell"),
+            data: CellData {
+                flags: CellFlags::INTERIOR,
+                ..Default::default()
+            },
+            references: vec![
+                reference(1, "test_stat", None),
+                reference(2, "test_stat", None),
+            ],
+            ..Default::default()
+        })],
+    };
+
+    let mut app = app_with_assets();
+    let handle = app
+        .world_mut()
+        .resource_mut::<Assets<LoadOrderAsset>>()
+        .add(LoadOrderAsset::from_esms(vec![
+            Esm::from_static(base),
+            Esm::from_static(override_),
+        ]));
+
+    let seed = app
+        .world_mut()
+        .spawn(CellSeed {
+            load_order: handle,
+            cell: CellId::interior("Test Cell"),
+        })
+        .id();
+    pump_until_settled(&mut app, seed);
+
+    let spawned = app
+        .world()
+        .entity(seed)
+        .get::<CellSpawned>()
+        .expect("seed resolved");
+    assert_eq!(
+        (spawned.spawned, spawned.skipped),
+        (2, 0),
+        "the later plugin's two-reference cell won"
+    );
+}
+
 /// Re-swizzle a logical row-major 16×16 grid (south-west origin) into `VTEX` storage
 /// order — 4×4 blocks of 4×4 texels, the inverse of `Land::decode_textures` — so the
 /// spawn path exercises the de-swizzle end-to-end.
@@ -201,7 +271,7 @@ fn vtex_bytes(logical: &[u16; VTEX_GRID * VTEX_GRID]) -> Vec<u8> {
 ///
 /// With `vtex`, the LAND also carries a texture grid — value 1 (LTEX 0, `tx_a.dds`)
 /// everywhere except texel (5, 9), which is value 2 (LTEX 1, `tx_b.dds`).
-fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
+fn synthetic_exterior_asset(vtex: bool) -> LoadOrderAsset {
     // The synthetic EsmDirectory is 'static, so the computed VTEX blob is leaked (a few hundred
     // bytes, once per test).
     let texture_data = vtex.then(|| {
@@ -247,7 +317,7 @@ fn synthetic_exterior_asset(vtex: bool) -> EsmAsset {
             }),
         ],
     };
-    EsmAsset::from_static(esm)
+    LoadOrderAsset::from_static(esm)
 }
 
 #[test]
@@ -255,13 +325,13 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
     let mut app = app_with_assets();
     let handle = app
         .world_mut()
-        .resource_mut::<Assets<EsmAsset>>()
+        .resource_mut::<Assets<LoadOrderAsset>>()
         .add(synthetic_exterior_asset(true));
 
     let seed = app
         .world_mut()
         .spawn(CellSeed {
-            esm: handle,
+            load_order: handle,
             cell: CellId::exterior(1, 2),
         })
         .id();
@@ -333,13 +403,13 @@ fn exterior_without_vtex_keeps_the_plain_material() {
     let mut app = app_with_assets();
     let handle = app
         .world_mut()
-        .resource_mut::<Assets<EsmAsset>>()
+        .resource_mut::<Assets<LoadOrderAsset>>()
         .add(synthetic_exterior_asset(false));
 
     let seed = app
         .world_mut()
         .spawn(CellSeed {
-            esm: handle,
+            load_order: handle,
             cell: CellId::exterior(1, 2),
         })
         .id();
@@ -361,13 +431,13 @@ fn unknown_cell_marks_failure() {
     let mut app = app_with_assets();
     let handle = app
         .world_mut()
-        .resource_mut::<Assets<EsmAsset>>()
+        .resource_mut::<Assets<LoadOrderAsset>>()
         .add(synthetic_asset());
 
     let seed = app
         .world_mut()
         .spawn(CellSeed {
-            esm: handle,
+            load_order: handle,
             cell: CellId::interior("nowhere"),
         })
         .id();
@@ -384,7 +454,7 @@ fn interior_cell_spawns_references() {
         return;
     }
     let mut app = app_with_assets();
-    let esm: Handle<EsmAsset> = app
+    let load_order: Handle<LoadOrderAsset> = app
         .world()
         .resource::<AssetServer>()
         .load("tes://Morrowind.esm");
@@ -392,7 +462,7 @@ fn interior_cell_spawns_references() {
     let seed = app
         .world_mut()
         .spawn(CellSeed {
-            esm: esm.clone(),
+            load_order: load_order.clone(),
             cell: CellId::interior("Balmora, Caius Cosades' House"),
         })
         .id();
@@ -419,8 +489,8 @@ fn interior_cell_spawns_references() {
     // A cross-check against the raw record: the first placed reference with a transform
     // that got spawned must sit exactly where cell_reference_transform puts it.
     let (expected, object) = {
-        let esms = app.world().resource::<Assets<EsmAsset>>();
-        let asset = esms.get(&esm).expect("ESM loaded");
+        let load_orders = app.world().resource::<Assets<LoadOrderAsset>>();
+        let asset = load_orders.get(&load_order).expect("load order loaded");
         let cell = asset
             .cell(&CellId::interior("balmora, caius cosades' house"))
             .expect("cell exists");
@@ -471,20 +541,20 @@ fn exterior_cell_spawns_references() {
         return;
     }
     let mut app = app_with_assets();
-    let esm: Handle<EsmAsset> = app
+    let load_order: Handle<LoadOrderAsset> = app
         .world()
         .resource::<AssetServer>()
         .load("tes://Morrowind.esm");
-    let state = pump_until_loaded(&mut app, &esm);
+    let state = pump_until_loaded(&mut app, &load_order);
     assert!(matches!(state, LoadState::Loaded), "{state:?}");
 
     // Any well-populated exterior square with terrain will do; find one instead of
     // pinning a grid. Capture the raw VHGT fields for the independent cross-checks.
     let (grid, expected_first_height, min_height, distinct_textures) = {
-        let esms = app.world().resource::<Assets<EsmAsset>>();
-        let asset = esms.get(&esm).expect("ESM loaded");
-        asset
-            .esm()
+        let load_orders = app.world().resource::<Assets<LoadOrderAsset>>();
+        let asset = load_orders.get(&load_order).expect("load order loaded");
+        asset.load_order().esms()[0]
+            .directory()
             .records
             .iter()
             .find_map(|r| match r {
@@ -511,7 +581,7 @@ fn exterior_cell_spawns_references() {
     let seed = app
         .world_mut()
         .spawn(CellSeed {
-            esm,
+            load_order,
             cell: CellId::exterior(grid.0, grid.1),
         })
         .id();
