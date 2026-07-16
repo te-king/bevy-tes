@@ -270,7 +270,7 @@ impl CellSpawner<'_, '_, '_> {
         // Skinned models and runtime-resolved spawn points aren't supported yet; a
         // disabled reference is authored not to appear.
         let unsupported = matches!(
-            info.kind,
+            info.kind(),
             ObjectKind::Npc
                 | ObjectKind::Creature
                 | ObjectKind::BodyPart
@@ -300,7 +300,7 @@ impl CellSpawner<'_, '_, '_> {
             ChildOf(self.seed_entity),
         ));
 
-        if let Some(model) = info.model {
+        if let Some(model) = info.model() {
             let decoded = model.decode();
             match self.vfs.0.resolve_model(&decoded) {
                 Some(path) => {
@@ -317,8 +317,7 @@ impl CellSpawner<'_, '_, '_> {
             }
         }
 
-        if info.kind == ObjectKind::Light
-            && let Some(light) = &info.light
+        if let Some(light) = info.light()
             && !light
                 .flags
                 .intersects(LightFlags::NEGATIVE | LightFlags::OFF_BY_DEFAULT)

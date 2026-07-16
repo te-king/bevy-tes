@@ -25,6 +25,11 @@ use tes3_esm::records::cell::{Cell, CellFlags};
 use tes3_esm::records::land::Land;
 use tes3_esm::records::ligh::LightData;
 use tes3_esm::records::ltex::Ltex;
+use tes3_esm::records::{
+    acti::Acti, alch::Alch, appa::Appa, armo::Armo, body::Body, book::Book, clot::Clot, cont::Cont,
+    crea::Crea, door::Door, ingr::Ingr, levc::Levc, levi::Levi, ligh::Ligh, lock::Lock, misc::Misc,
+    npc::Npc, prob::Prob, repa::Repa, stat::Stat, weap::Weap,
+};
 use tes3_esm::{Esm, Record};
 
 /// Identifies a cell within a load order.
@@ -76,18 +81,93 @@ pub enum ObjectKind {
     LeveledItem,
 }
 
-/// What a cell reference's editor id resolves to: the record kind, its model path, and
-/// (for lights) the light parameters.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ObjectInfo<'a> {
-    pub kind: ObjectKind,
+/// What a cell reference's editor id resolves to: a borrowed view of the whole record
+/// that defined it (in whichever plugin defined it last).
+///
+/// Fields shared across record types have accessors ([`id`](ObjectRef::id),
+/// [`kind`](ObjectRef::kind), [`model`](ObjectRef::model), [`light`](ObjectRef::light));
+/// anything record-specific — a door's destinations, a container's inventory, a leveled
+/// list's entries — is reached by matching the variant.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ObjectRef<'a> {
+    Static(&'a Stat<'a>),
+    Activator(&'a Acti<'a>),
+    Container(&'a Cont<'a>),
+    Door(&'a Door<'a>),
+    Light(&'a Ligh<'a>),
+    Misc(&'a Misc<'a>),
+    Weapon(&'a Weap<'a>),
+    Armor(&'a Armo<'a>),
+    Clothing(&'a Clot<'a>),
+    Book(&'a Book<'a>),
+    Ingredient(&'a Ingr<'a>),
+    Potion(&'a Alch<'a>),
+    Apparatus(&'a Appa<'a>),
+    Lockpick(&'a Lock<'a>),
+    Probe(&'a Prob<'a>),
+    Repair(&'a Repa<'a>),
+    Creature(&'a Crea<'a>),
+    Npc(&'a Npc<'a>),
+    BodyPart(&'a Body<'a>),
+    LeveledCreature(&'a Levc<'a>),
+    LeveledItem(&'a Levi<'a>),
+}
+
+impl<'a> ObjectRef<'a> {
+    /// The fields every placeable record shares, extracted in one dispatch: editor id,
+    /// kind tag, and the raw `MODL` value (absent on leveled lists, optional on a few
+    /// record types).
+    fn parts(self) -> (&'a L1Str, ObjectKind, Option<&'a L1Str>) {
+        match self {
+            ObjectRef::Static(r) => (r.id, ObjectKind::Static, Some(r.model)),
+            ObjectRef::Activator(r) => (r.id, ObjectKind::Activator, Some(r.model)),
+            ObjectRef::Container(r) => (r.id, ObjectKind::Container, Some(r.model)),
+            ObjectRef::Door(r) => (r.id, ObjectKind::Door, Some(r.model)),
+            ObjectRef::Light(r) => (r.id, ObjectKind::Light, r.model),
+            ObjectRef::Misc(r) => (r.id, ObjectKind::Misc, Some(r.model)),
+            ObjectRef::Weapon(r) => (r.id, ObjectKind::Weapon, Some(r.model)),
+            ObjectRef::Armor(r) => (r.id, ObjectKind::Armor, Some(r.model)),
+            ObjectRef::Clothing(r) => (r.id, ObjectKind::Clothing, Some(r.model)),
+            ObjectRef::Book(r) => (r.id, ObjectKind::Book, Some(r.model)),
+            ObjectRef::Ingredient(r) => (r.id, ObjectKind::Ingredient, Some(r.model)),
+            ObjectRef::Potion(r) => (r.id, ObjectKind::Potion, r.model),
+            ObjectRef::Apparatus(r) => (r.id, ObjectKind::Apparatus, r.model),
+            ObjectRef::Lockpick(r) => (r.id, ObjectKind::Lockpick, Some(r.model)),
+            ObjectRef::Probe(r) => (r.id, ObjectKind::Probe, Some(r.model)),
+            ObjectRef::Repair(r) => (r.id, ObjectKind::Repair, Some(r.model)),
+            ObjectRef::Creature(r) => (r.id, ObjectKind::Creature, Some(r.model)),
+            ObjectRef::Npc(r) => (r.id, ObjectKind::Npc, r.model),
+            ObjectRef::BodyPart(r) => (r.id, ObjectKind::BodyPart, Some(r.model)),
+            ObjectRef::LeveledCreature(r) => (r.id, ObjectKind::LeveledCreature, None),
+            ObjectRef::LeveledItem(r) => (r.id, ObjectKind::LeveledItem, None),
+        }
+    }
+
+    /// The record's editor id, as authored.
+    pub fn id(self) -> &'a L1Str {
+        self.parts().0
+    }
+
+    /// The record kind, as a plain tag for skip lists and diagnostics.
+    pub fn kind(self) -> ObjectKind {
+        self.parts().1
+    }
+
     /// Model path as authored — a [`TesPath`] view borrowing the record's `MODL` bytes,
     /// so it compares and hashes case- and separator-insensitively (e.g.
     /// `F\Act_BM_FireLake00.NIF`), relative to `meshes\`. `None` for model-less records
     /// and empty `MODL` subrecords.
-    pub model: Option<&'a TesPath>,
-    /// Present only for [`ObjectKind::Light`].
-    pub light: Option<LightData>,
+    pub fn model(self) -> Option<&'a TesPath> {
+        model_path(self.parts().2)
+    }
+
+    /// The light parameters, for [`ObjectRef::Light`] records only.
+    pub fn light(self) -> Option<&'a LightData> {
+        match self {
+            ObjectRef::Light(r) => Some(&r.data),
+            _ => None,
+        }
+    }
 }
 
 /// A parsed load order: the owned plugin buffers plus a lookup table borrowing their
@@ -109,9 +189,9 @@ self_cell!(
 /// Later plugins overwrite earlier ones on key collision (last-definition-wins).
 #[derive(Default)]
 struct TesLoadOrderTable<'a> {
-    /// Editor id → object info. Keys borrow the record id bytes and fold case, so lookups
-    /// need no allocation.
-    objects: HashMap<&'a TesId, ObjectInfo<'a>>,
+    /// Editor id → the defining record. Keys borrow the record id bytes and fold case,
+    /// so lookups need no allocation.
+    objects: HashMap<&'a TesId, ObjectRef<'a>>,
     /// Interior cell name → its `CELL` record. Case-folded key.
     interiors: HashMap<&'a TesId, &'a Cell<'a>>,
     /// Exterior grid → its `CELL` record.
@@ -138,8 +218,11 @@ impl TesLoadOrder {
     }
 
     /// Look up a placeable object by editor id (any case).
-    pub fn object(&self, id: &str) -> Option<&ObjectInfo<'_>> {
-        self.table().objects.get(TesId::from_bytes(id.as_bytes()))
+    pub fn object(&self, id: &str) -> Option<ObjectRef<'_>> {
+        self.table()
+            .objects
+            .get(TesId::from_bytes(id.as_bytes()))
+            .copied()
     }
 
     /// Look up a cell record by id (interior names match case-insensitively).
@@ -195,60 +278,29 @@ fn build_table(esms: &[Esm]) -> TesLoadOrderTable<'_> {
                             .insert((cell.data.grid_x, cell.data.grid_y), cell);
                     }
                 }
-                Record::Stat(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Static, Some(r.model))
-                }
-                Record::Acti(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Activator, Some(r.model))
-                }
-                Record::Cont(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Container, Some(r.model))
-                }
-                Record::Door(r) => object_entry(&mut table, r.id, ObjectKind::Door, Some(r.model)),
-                Record::Misc(r) => object_entry(&mut table, r.id, ObjectKind::Misc, Some(r.model)),
-                Record::Weap(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Weapon, Some(r.model))
-                }
-                Record::Armo(r) => object_entry(&mut table, r.id, ObjectKind::Armor, Some(r.model)),
-                Record::Clot(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Clothing, Some(r.model))
-                }
-                Record::Book(r) => object_entry(&mut table, r.id, ObjectKind::Book, Some(r.model)),
-                Record::Ingr(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Ingredient, Some(r.model))
-                }
-                Record::Lock(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Lockpick, Some(r.model))
-                }
-                Record::Prob(r) => object_entry(&mut table, r.id, ObjectKind::Probe, Some(r.model)),
-                Record::Repa(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Repair, Some(r.model))
-                }
-                Record::Crea(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::Creature, Some(r.model))
-                }
-                Record::Body(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::BodyPart, Some(r.model))
-                }
-                Record::Alch(r) => object_entry(&mut table, r.id, ObjectKind::Potion, r.model),
-                Record::Appa(r) => object_entry(&mut table, r.id, ObjectKind::Apparatus, r.model),
-                Record::Npc(r) => object_entry(&mut table, r.id, ObjectKind::Npc, r.model),
-                Record::Ligh(r) => {
-                    table.objects.insert(
-                        TesId::new(r.id),
-                        ObjectInfo {
-                            kind: ObjectKind::Light,
-                            model: model_path(r.model),
-                            light: Some(r.data),
-                        },
-                    );
-                }
-                // Indexed by kind only, so a skipped leveled-list reference logs as
-                // "leveled list" rather than "unknown id".
-                Record::Levi(r) => object_entry(&mut table, r.id, ObjectKind::LeveledItem, None),
-                Record::Levc(r) => {
-                    object_entry(&mut table, r.id, ObjectKind::LeveledCreature, None)
-                }
+                Record::Stat(r) => table.insert_object(ObjectRef::Static(r)),
+                Record::Acti(r) => table.insert_object(ObjectRef::Activator(r)),
+                Record::Cont(r) => table.insert_object(ObjectRef::Container(r)),
+                Record::Door(r) => table.insert_object(ObjectRef::Door(r)),
+                Record::Ligh(r) => table.insert_object(ObjectRef::Light(r)),
+                Record::Misc(r) => table.insert_object(ObjectRef::Misc(r)),
+                Record::Weap(r) => table.insert_object(ObjectRef::Weapon(r)),
+                Record::Armo(r) => table.insert_object(ObjectRef::Armor(r)),
+                Record::Clot(r) => table.insert_object(ObjectRef::Clothing(r)),
+                Record::Book(r) => table.insert_object(ObjectRef::Book(r)),
+                Record::Ingr(r) => table.insert_object(ObjectRef::Ingredient(r)),
+                Record::Alch(r) => table.insert_object(ObjectRef::Potion(r)),
+                Record::Appa(r) => table.insert_object(ObjectRef::Apparatus(r)),
+                Record::Lock(r) => table.insert_object(ObjectRef::Lockpick(r)),
+                Record::Prob(r) => table.insert_object(ObjectRef::Probe(r)),
+                Record::Repa(r) => table.insert_object(ObjectRef::Repair(r)),
+                Record::Crea(r) => table.insert_object(ObjectRef::Creature(r)),
+                Record::Npc(r) => table.insert_object(ObjectRef::Npc(r)),
+                Record::Body(r) => table.insert_object(ObjectRef::BodyPart(r)),
+                // Leveled lists are indexed too (not yet spawnable), so a skipped
+                // reference resolves as "leveled list" rather than "unknown id".
+                Record::Levc(r) => table.insert_object(ObjectRef::LeveledCreature(r)),
+                Record::Levi(r) => table.insert_object(ObjectRef::LeveledItem(r)),
                 Record::Land(land) => {
                     table.lands.insert((land.grid_x, land.grid_y), land);
                 }
@@ -262,20 +314,10 @@ fn build_table(esms: &[Esm]) -> TesLoadOrderTable<'_> {
     table
 }
 
-fn object_entry<'a>(
-    table: &mut TesLoadOrderTable<'a>,
-    id: &'a L1Str,
-    kind: ObjectKind,
-    model: Option<&'a L1Str>,
-) {
-    table.objects.insert(
-        TesId::new(id),
-        ObjectInfo {
-            kind,
-            model: model_path(model),
-            light: None,
-        },
-    );
+impl<'a> TesLoadOrderTable<'a> {
+    fn insert_object(&mut self, object: ObjectRef<'a>) {
+        self.objects.insert(TesId::new(object.id()), object);
+    }
 }
 
 /// View a `MODL` value as a [`TesPath`] for VFS lookup; empty strings (some records carry
@@ -364,20 +406,27 @@ mod tests {
         let order = synthetic_order();
 
         let stat = order.object("T_STAT").expect("stat by upper-cased id");
-        assert_eq!(stat.kind, ObjectKind::Static);
-        let model = stat.model.expect("stat has a model");
+        assert_eq!(stat.kind(), ObjectKind::Static);
+        let model = stat.model().expect("stat has a model");
         // The view borrows the original MODL bytes unchanged (no normalizing copy)...
         assert_eq!(model.as_bytes(), br"F\Furn_Thing.NIF");
         // ...but as a TesPath it still matches case- and separator-folded.
         assert_eq!(model, TesPath::from_bytes(br"f/furn_thing.nif"));
-        assert_eq!(stat.light, None);
+        assert_eq!(stat.light(), None);
 
         let light = order.object("Light_Fire").expect("light by mixed-case id");
-        assert_eq!(light.kind, ObjectKind::Light);
-        assert_eq!(light.model, None, "empty MODL must not become a path");
-        assert_eq!(light.light.unwrap().radius, 256);
+        assert_eq!(light.kind(), ObjectKind::Light);
+        assert_eq!(light.model(), None, "empty MODL must not become a path");
+        assert_eq!(light.light().unwrap().radius, 256);
 
-        assert_eq!(order.object("Rat_Cave").unwrap().kind, ObjectKind::Creature);
+        // Matching the variant reaches the whole defining record, not a projection.
+        let rat = order.object("Rat_Cave").expect("creature by mixed-case id");
+        assert_eq!(rat.kind(), ObjectKind::Creature);
+        let ObjectRef::Creature(crea) = rat else {
+            panic!("expected a creature record, got {rat:?}");
+        };
+        assert_eq!(crea.id.decode(), "rat_cave");
+
         assert_eq!(order.object("nowhere"), None);
     }
 
@@ -441,7 +490,7 @@ mod tests {
             order
                 .object("shared_stat")
                 .unwrap()
-                .model
+                .model()
                 .unwrap()
                 .as_bytes(),
             br"b\two.nif",
