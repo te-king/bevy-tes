@@ -4,7 +4,7 @@
 //! live loose in the data directory or inside a BSA archive — the VFS layers both:
 //!
 //! ```text
-//! cargo run -p bevy-tes --example render_nif --features render -- meshes/i/in_de_shack_01.nif
+//! cargo run --release -p bevy-render-nif -- meshes/i/in_de_shack_01.nif
 //! ```
 //!
 //! By default this renders one frame off a fixed three-quarter view, saves it to a PNG,
@@ -17,7 +17,7 @@
 //!
 //! All the loading heavy lifting — scene-graph traversal, texture resolution through
 //! loose files and archives, material construction — happens inside `bevy_tes`'s NIF
-//! loader; this example only spawns the scene and stages a camera, lights and ground
+//! loader; this binary only spawns the scene and stages a camera, lights and ground
 //! around whatever geometry shows up.
 
 use std::path::{Path, PathBuf};

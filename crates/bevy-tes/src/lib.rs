@@ -23,7 +23,7 @@
 //!     .run();
 //! ```
 //!
-//! With the `scene` feature (implied by `render`), a NIF load additionally emits
+//! With the `scene` feature (on by default), a NIF load additionally emits
 //! spawnable content as labeled sub-assets — `Mesh`es, `StandardMaterial`s (their
 //! textures resolved through the VFS, so archive-only textures work), and a
 //! `WorldAsset` scene preserving the model's node hierarchy:

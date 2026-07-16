@@ -396,6 +396,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy-render-nif"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy-tes",
+ "clap",
+]
+
+[[package]]
 name = "bevy-tes"
 version = "0.1.0"
 dependencies = [
