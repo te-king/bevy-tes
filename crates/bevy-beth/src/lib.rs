@@ -94,7 +94,7 @@ pub use cell::{
 };
 #[cfg(feature = "scene")]
 pub use terrain::{TerrainPlugin, TerrainSplatMaterial};
-pub use tes_loadorder::{CellId, ObjectInfo, ObjectKind, TesLoadOrder};
+pub use tes_loadorder::{CellId, ObjectKind, ObjectRef, TesLoadOrder};
 pub use tes_vfs::{TesVfs, TesVfsReader};
 
 pub use tes_nif;
@@ -155,7 +155,7 @@ impl EsmAsset {
     }
 
     /// Look up a placeable object by editor id (any case).
-    pub fn object(&self, id: &str) -> Option<&ObjectInfo<'_>> {
+    pub fn object(&self, id: &str) -> Option<ObjectRef<'_>> {
         self.load_order.object(id)
     }
 

@@ -431,7 +431,7 @@ fn interior_cell_spawns_references() {
                 r.transform.is_some()
                     && asset
                         .object(&r.object.decode())
-                        .is_some_and(|o| o.kind == bevy_beth::ObjectKind::Static)
+                        .is_some_and(|o| o.kind() == bevy_beth::ObjectKind::Static)
             })
             .expect("a placed static");
         (
