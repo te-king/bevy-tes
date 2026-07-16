@@ -387,7 +387,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy-beth"
+name = "bevy-tes"
 version = "0.1.0"
 dependencies = [
  "bevy",

@@ -6,7 +6,7 @@ resolver = "3"
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/te-king/bevy-beth"
+repository = "https://github.com/te-king/bevy-tes"
 
 [workspace.dependencies]
 # Internal crates (path deps shared across the workspace).
@@ -15,6 +15,7 @@ tes3-esm = { path = "crates/tes3-esm" }
 tes3-bsa = { path = "crates/tes3-bsa" }
 tes-nif = { path = "crates/tes-nif" }
 tes-testdata = { path = "crates/tes-testdata" }
+bevy-tes = { path = "crates/bevy-tes" }
 
 # Third-party.
 bitflags = "2"

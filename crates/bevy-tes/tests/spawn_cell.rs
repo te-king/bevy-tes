@@ -23,7 +23,7 @@ use tes3_esm::records::ltex::Ltex;
 use tes3_esm::records::stat::Stat;
 use tes3_esm::{Esm, EsmDirectory, L1Str, Record};
 
-use bevy_beth::{
+use bevy_tes::{
     CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
     LoadOrderAsset, TerrainSplatMaterial,
 };
@@ -185,7 +185,7 @@ fn synthetic_cell_spawns_and_skips() {
 #[test]
 fn later_plugin_overrides_cell() {
     // The base plugin defines the object and a one-reference "Test Cell"; the override
-    // plugin redefines the same cell with two references. Exactly what BethPlugin's
+    // plugin redefines the same cell with two references. Exactly what TesPlugin's
     // plugin-list ingest produces — the later CELL record must win, while the base
     // plugin's STAT stays resolvable through the merged object table.
     let base = EsmDirectory {
@@ -501,11 +501,11 @@ fn interior_cell_spawns_references() {
                 r.transform.is_some()
                     && asset
                         .object(&r.object.decode())
-                        .is_some_and(|o| o.kind() == bevy_beth::ObjectKind::Static)
+                        .is_some_and(|o| o.kind() == bevy_tes::ObjectKind::Static)
             })
             .expect("a placed static");
         (
-            bevy_beth::convert::cell_reference_transform(
+            bevy_tes::convert::cell_reference_transform(
                 reference.transform.as_ref().unwrap(),
                 reference.scale.unwrap_or(1.0),
             ),

@@ -136,7 +136,7 @@ pub struct CellEnvironment {
 type PendingSeeds<'w, 's> =
     Query<'w, 's, (Entity, &'static CellSeed), (Without<CellSpawned>, Without<CellSpawnFailed>)>;
 
-/// Resolves pending [`CellSeed`]s and spawns their cells. Registered by `BethPlugin`
+/// Resolves pending [`CellSeed`]s and spawns their cells. Registered by `TesPlugin`
 /// under the `scene` feature; polls until each seed's load order loads, then spawns
 /// once.
 ///
@@ -169,7 +169,7 @@ pub fn spawn_cells(
         let Some(load_order) = load_orders.get(&seed.load_order) else {
             if let bevy::asset::LoadState::Failed(e) = asset_server.load_state(&seed.load_order) {
                 eprintln!(
-                    "bevy-beth: load order failed to load for {:?}: {e}",
+                    "bevy-tes: load order failed to load for {:?}: {e}",
                     seed.cell
                 );
                 commands
@@ -179,10 +179,7 @@ pub fn spawn_cells(
             continue; // still loading; try again next frame
         };
         let Some(cell) = load_order.cell(&seed.cell) else {
-            eprintln!(
-                "bevy-beth: cell {:?} not found in the load order",
-                seed.cell
-            );
+            eprintln!("bevy-tes: cell {:?} not found in the load order", seed.cell);
             commands
                 .entity(seed_entity)
                 .insert(CellSpawnFailed(format!("no such cell: {:?}", seed.cell)));
@@ -207,7 +204,7 @@ pub fn spawn_cells(
             // MVRF relocates references defined by another plugin; meaningless without
             // multi-plugin merging (future work) and absent from single vanilla ESMs.
             eprintln!(
-                "bevy-beth: skipping {} moved references in {:?}",
+                "bevy-tes: skipping {} moved references in {:?}",
                 cell.moved_references.len(),
                 seed.cell
             );
@@ -270,7 +267,7 @@ impl CellSpawner<'_, '_, '_> {
         let object_id = reference.object.decode().into_owned();
         let Some(info) = self.load_order.object(&object_id) else {
             if self.warned.insert(object_id.clone()) {
-                eprintln!("bevy-beth: cell references unknown object id {object_id:?}");
+                eprintln!("bevy-tes: cell references unknown object id {object_id:?}");
             }
             self.skipped += 1;
             return;
@@ -319,7 +316,7 @@ impl CellSpawner<'_, '_, '_> {
                 }
                 None => {
                     if self.warned.insert(decoded.into_owned()) {
-                        eprintln!("bevy-beth: cannot resolve model {model} (for {object_id:?})");
+                        eprintln!("bevy-tes: cannot resolve model {model} (for {object_id:?})");
                     }
                 }
             }
@@ -543,7 +540,7 @@ fn white_stand_in(
 
 fn warn_once(warned: &mut HashSet<String>, message: String) {
     if warned.insert(message.clone()) {
-        eprintln!("bevy-beth: {message}");
+        eprintln!("bevy-tes: {message}");
     }
 }
 

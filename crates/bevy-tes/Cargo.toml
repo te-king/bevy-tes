@@ -1,5 +1,5 @@
 [package]
-name = "bevy-beth"
+name = "bevy-tes"
 description = "Bevy plugin loading TES3 (Morrowind) data files: plugins, BSA archives and NIF models"
 version = "0.1.0"
 edition.workspace = true

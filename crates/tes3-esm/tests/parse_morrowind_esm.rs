@@ -221,7 +221,7 @@ fn land_heights_decode_and_tile_seamlessly() {
 
 /// Time how long it takes to parse the full file. Run with `--show-output` (or
 /// `--nocapture`) to see the measurements, e.g.:
-/// `cargo test -p beth-rs --release parse_timing -- --show-output`
+/// `cargo test -p tes3-esm --release parse_timing -- --show-output`
 #[test]
 fn parse_timing() {
     use std::time::Instant;

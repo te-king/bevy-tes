@@ -7,24 +7,24 @@ use bevy::app::App;
 use bevy::asset::{AssetPlugin, AssetServer, Handle, LoadState};
 use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
 
-use bevy_beth::BethPlugin;
+use bevy_tes::TesPlugin;
 
 /// The workspace `data/` directory holding the (gitignored) game data. Bevy resolves the
 /// asset root relative to `CARGO_MANIFEST_DIR` (this crate) when run under cargo, and
-/// `BethPlugin`'s VFS resolves against the process working directory — the same place
+/// `TesPlugin`'s VFS resolves against the process working directory — the same place
 /// under cargo.
 pub const DATA_ROOT: &str = "../../data";
 
-/// [`app_with`] on a default `BethPlugin` serving [`DATA_ROOT`].
+/// [`app_with`] on a default `TesPlugin` serving [`DATA_ROOT`].
 pub fn app_with_assets() -> App {
-    app_with(BethPlugin::new(DATA_ROOT))
+    app_with(TesPlugin::new(DATA_ROOT))
 }
 
 /// A headless app with just enough asset machinery for the loaders under test: the
 /// plugins register the `tes://` source and the ESM/NIF loaders; under the `scene`
 /// feature, manual registrations stand in for the render plugins that would normally own
 /// the `Image`/`Mesh`/material/scene asset types.
-pub fn app_with(beth: BethPlugin) -> App {
+pub fn app_with(beth: TesPlugin) -> App {
     // Asset loading runs on Bevy's task pools, which `DefaultPlugins` would set up. A
     // headless test must initialize them itself.
     IoTaskPool::get_or_init(Default::default);
@@ -33,7 +33,7 @@ pub fn app_with(beth: BethPlugin) -> App {
 
     let mut app = App::new();
     app.add_plugins((
-        // BethPlugin must precede AssetPlugin: asset sources register before the server.
+        // TesPlugin must precede AssetPlugin: asset sources register before the server.
         beth,
         AssetPlugin {
             file_path: DATA_ROOT.to_string(),
@@ -49,11 +49,11 @@ pub fn app_with(beth: BethPlugin) -> App {
             .init_asset::<bevy::pbr::StandardMaterial>()
             // The splat asset's presence is what opts cell spawning into terrain
             // splatting (a render app would get it from TerrainPlugin).
-            .init_asset::<bevy_beth::TerrainSplatMaterial>()
+            .init_asset::<bevy_tes::TerrainSplatMaterial>()
             .init_asset::<bevy::world_serialization::WorldAsset>()
             .register_asset_loader(ImageLoader::new(CompressedImageFormats::BC));
     }
-    // Headless apps must finish plugin setup themselves; BethPlugin registers its
+    // Headless apps must finish plugin setup themselves; TesPlugin registers its
     // loaders in `Plugin::finish`.
     app.finish();
     app

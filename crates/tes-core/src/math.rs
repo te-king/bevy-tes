@@ -1,7 +1,7 @@
 //! Plain numeric primitives shared by the format parsers.
 //!
 //! These are deliberately minimal, dependency-light, and free of any `glam`/Bevy
-//! dependency so the parser crates stay light. Downstream (e.g. `bevy-beth`) converts
+//! dependency so the parser crates stay light. Downstream (e.g. `bevy-tes`) converts
 //! them into engine types.
 
 use nom::IResult;

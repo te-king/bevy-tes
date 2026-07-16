@@ -106,10 +106,7 @@ impl TesVfs {
             .filter_map(|p| match Bsa::open(p) {
                 Ok(bsa) => Some(bsa),
                 Err(e) => {
-                    eprintln!(
-                        "bevy-beth: skipping unreadable archive {}: {e}",
-                        p.display()
-                    );
+                    eprintln!("bevy-tes: skipping unreadable archive {}: {e}", p.display());
                     None
                 }
             })

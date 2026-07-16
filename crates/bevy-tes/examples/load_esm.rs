@@ -1,4 +1,4 @@
-//! Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` via [`BethPlugin`]
+//! Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` via [`TesPlugin`]
 //! and print a summary of what was parsed.
 //!
 //! Run with the local game master (default, see `data/README.md`):
@@ -13,7 +13,7 @@
 //! cargo run --example load_esm -- path/to/Plugin.esp
 //! ```
 //!
-//! This is a headless example: it adds only `AssetPlugin` + `BethPlugin` and pumps the
+//! This is a headless example: it adds only `AssetPlugin` + `TesPlugin` and pumps the
 //! app manually until the asset finishes loading, so it needs none of Bevy's rendering
 //! or windowing features.
 
@@ -27,7 +27,7 @@ use bevy::asset::{AssetPlugin, AssetServer, Assets, Handle, LoadState};
 use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
 use clap::Parser;
 
-use bevy_beth::{BethPlugin, LoadOrderAsset};
+use bevy_tes::{LoadOrderAsset, TesPlugin};
 use tes3_esm::records::tes3::HeaderFlags;
 
 /// Load a TES3 plugin (`.esm`/`.esp`) through Bevy's `AssetServer` and print a summary.
@@ -74,10 +74,10 @@ fn main() -> ExitCode {
     ComputeTaskPool::get_or_init(Default::default);
 
     let mut app = App::new();
-    // BethPlugin first: it must register its asset source before AssetPlugin builds the
+    // TesPlugin first: it must register its asset source before AssetPlugin builds the
     // AssetServer (it asserts this).
     app.add_plugins((
-        BethPlugin::default(),
+        TesPlugin::default(),
         AssetPlugin {
             file_path: root,
             ..Default::default()
