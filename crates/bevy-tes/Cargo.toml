@@ -33,7 +33,3 @@ tes-testdata = { workspace = true }
 [[example]]
 name = "render_nif"
 required-features = ["render"]
-
-[[example]]
-name = "render_cell"
-required-features = ["render"]

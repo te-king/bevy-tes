@@ -2,8 +2,8 @@
 //! Bevy, spawned from an ESM through `bevy_tes`'s `CellSeed`:
 //!
 //! ```text
-//! cargo run -p bevy-tes --example render_cell --features render -- "Balmora, Guild of Mages"
-//! cargo run -p bevy-tes --example render_cell --features render -- --exterior=-3,-2
+//! cargo run --release -p bevy-render-cell -- "Balmora, Guild of Mages"
+//! cargo run --release -p bevy-render-cell -- --exterior=-3,-2
 //! ```
 //!
 //! By default this waits until the cell's models have streamed in, frames the scene,
@@ -15,7 +15,7 @@
 //! speed).
 //!
 //! Cell resolution, reference placement, light spawning and NIF/texture loading all
-//! happen inside `bevy_tes`; this example stages a camera and lighting around the
+//! happen inside `bevy_tes`; this binary stages a camera and lighting around the
 //! spawned entities. Exterior cells include their LAND terrain — texture-splatted from
 //! the VTEX grid via `TerrainPlugin`, tinted by the vertex colors — and a sea-level
 //! water plane where the ground dips below zero.
