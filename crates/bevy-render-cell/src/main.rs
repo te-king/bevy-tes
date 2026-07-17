@@ -198,11 +198,6 @@ fn parse_grid(s: &str) -> Option<(i32, i32)> {
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
 
-/// Game units per meter: Morrowind's 64 units = 1 yard. The atmosphere works in meters,
-/// so the planet entity is scaled by this to keep sky curvature and aerial perspective
-/// at the right world scale.
-const UNITS_PER_METER: f32 = 70.0;
-
 /// Once the cell has spawned and its models have settled, stage the set: camera framed
 /// on the spawned geometry, ambient from the cell's own values, a key light for
 /// exteriors. Runs once; also the failure exit when the cell can't spawn.
@@ -258,7 +253,7 @@ fn frame_cell(
         max = max.max(gt.translation());
     }
     let center = (min + max) * 0.5;
-    let r = ((max - min).length() * 0.5).max(100.0);
+    let r = ((max - min).length() * 0.5).max(2.0);
 
     // Stage per cell kind: interiors are lit by their authored ambient plus the placed
     // lights; exteriors get daylight and a shadow-casting sun, with their ambient
@@ -291,7 +286,7 @@ fn frame_cell(
             let mut t = lit.iter().sum::<Vec3>() / lit.len() as f32;
             // Keep the view near-horizontal: it's a room, not a floor inspection.
             t.y = t.y.clamp(center.y - r * 0.2, center.y + r * 0.2);
-            if t.distance(center) < 1.0 {
+            if t.distance(center) < 0.05 {
                 t += Vec3::X;
             }
             t
@@ -302,26 +297,25 @@ fn frame_cell(
         Transform::from_translation(center + Vec3::new(r * 0.7, r * 0.8, r * 0.7))
             .looking_at(center, Vec3::Y)
     };
-    // Procedural sky: one earth-like atmosphere, scaled from meters to game units. The
-    // planet center sits `inner_radius` below the origin so the world sits on its
-    // surface (the default-transform hook would do this unscaled; setting a scale means
-    // placing it ourselves). The sky's look is driven by the directional sun below.
-    // Staged for interiors and exteriors alike — an interior only shows it through door
-    // gaps, and per-kind tuning can come later.
+    // Procedural sky: one earth-like atmosphere (the world is in meters, so no scaling).
+    // The planet center sits `inner_radius` below the origin so the world sits on its
+    // surface. The sky's look is driven by the directional sun below. Staged for
+    // interiors and exteriors alike — an interior only shows it through door gaps, and
+    // per-kind tuning can come later.
     let atmosphere = Atmosphere::earth(scattering_mediums.add(ScatteringMedium::earth(256, 256)));
     commands.spawn((
-        Transform::from_translation(-Vec3::Y * atmosphere.inner_radius * UNITS_PER_METER)
-            .with_scale(Vec3::splat(UNITS_PER_METER)),
+        Transform::from_translation(-Vec3::Y * atmosphere.inner_radius),
         atmosphere,
     ));
 
     let mut camera = commands.spawn((
         Camera3d::default(),
         camera_transform,
-        // Game units are big (~70/m): push the far plane out so a town block fits.
+        // The far plane covers the whole landmass (~5 km across) for later distant-land
+        // work; the default 1000 m would clip a long exterior view.
         Projection::Perspective(PerspectiveProjection {
-            near: 1.0,
-            far: 200_000.0,
+            near: 0.1,
+            far: 5_000.0,
             ..default()
         }),
         ambient,
@@ -356,13 +350,8 @@ fn frame_cell(
     ));
     if capture.is_none() {
         // Bevy's free camera; the controller logs its controls on the first frame. The
-        // metric default speeds are far too slow for game units (~70/m), so scale them
-        // to cross a town block in a few seconds.
-        camera.insert(FreeCamera {
-            walk_speed: 500.0,
-            run_speed: 2_000.0,
-            ..default()
-        });
+        // world is in meters, so the metric default speeds fit (scroll rescales them).
+        camera.insert(FreeCamera::default());
     }
 
     if !environment.interior {

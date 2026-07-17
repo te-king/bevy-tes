@@ -2,7 +2,8 @@
 //!
 //! Spawn an entity with a [`CellSeed`] naming a cell; once the [`LoadOrderAsset`] is
 //! loaded, [`spawn_cells`] resolves the cell record and spawns one child entity per
-//! object reference — each with the reference's placement as a Y-up [`Transform`] and,
+//! object reference — each with the reference's placement as a Y-up [`Transform`] in
+//! meters (see [`convert::METERS_PER_UNIT`](crate::convert::METERS_PER_UNIT)) and,
 //! when its object's model resolves in the VFS, a [`WorldAssetRoot`] pointing at the
 //! NIF's `#Scene` sub-asset. Only the NIFs a spawned cell actually references get
 //! loaded.
@@ -56,18 +57,20 @@ use bevy::render::renderer::RenderDevice;
 use bevy::transform::components::Transform;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use tes3_esm::records::cell::{Cell, CellFlags, Reference};
-use tes3_esm::records::land::{CELL_SIZE, Land, VTEX_GRID};
+use tes3_esm::records::land::{Land, VTEX_GRID};
 use tes3_esm::records::ligh::LightFlags;
 
 use crate::terrain::{self, MAX_TERRAIN_LAYERS, TerrainSplatMaterial};
 use crate::tes_loadorder::{CellId, ObjectKind};
 use crate::{LoadOrderAsset, TesVfsHandle, convert};
 
-/// Point-light lumens per game-unit² of `LightData::radius`. A documented heuristic, not
-/// game data: Morrowind's fixed-function attenuation doesn't translate to physical
-/// units, so this is chosen so a radius-256 torch reads correctly at game-unit scale
-/// (1 m ≈ 70 units; illuminance falls with the square of the distance in units).
-const LIGHT_INTENSITY_PER_UNIT_SQ: f32 = 20_000.0;
+/// Point-light lumens per meter² of light range. A documented heuristic, not game data:
+/// Morrowind's fixed-function attenuation doesn't translate to physical units, so this
+/// is chosen so a radius-256 torch (range ≈ 3.7 m) reads correctly. Scaling intensity
+/// with the *square* of the range keeps the illuminance at any given fraction of the
+/// range constant across light sizes. The absolute values are far above physical lumens
+/// (the viewers meter exposure automatically); a physical retune is future work.
+const LIGHT_INTENSITY_PER_METER_SQ: f32 = 20_000.0;
 
 /// Asks for a cell's contents to be spawned as children of this entity, once
 /// `load_order` finishes loading. One-shot: the seed entity is tagged [`CellSpawned`]
@@ -127,8 +130,7 @@ pub struct CellEnvironment {
     pub sunlight: Option<Color>,
     /// Interior fog colour and density (`AMBI`).
     pub fog: Option<(Color, f32)>,
-    /// Water surface height in game units — equal to the Bevy Y coordinate after the
-    /// Z-up→Y-up conversion.
+    /// Water surface height in meters — the Bevy Y coordinate of the water plane.
     pub water_height: Option<f32>,
 }
 
@@ -327,11 +329,11 @@ impl CellSpawner<'_, '_, '_> {
                 .flags
                 .intersects(LightFlags::NEGATIVE | LightFlags::OFF_BY_DEFAULT)
         {
-            let radius = light.radius as f32;
+            let range = light.radius as f32 * convert::METERS_PER_UNIT;
             child.insert(PointLight {
                 color: Color::srgb_u8(light.color.r, light.color.g, light.color.b),
-                intensity: LIGHT_INTENSITY_PER_UNIT_SQ * radius * radius,
-                range: radius,
+                intensity: LIGHT_INTENSITY_PER_METER_SQ * range * range,
+                range,
                 ..Default::default()
             });
         }
@@ -348,12 +350,12 @@ fn environment(cell: &Cell) -> CellEnvironment {
         ambient: cell.ambient.map(|a| srgb(a.ambient)),
         sunlight: cell.ambient.map(|a| srgb(a.sunlight)),
         fog: cell.ambient.map(|a| (srgb(a.fog), a.fog_density)),
-        water_height: cell.water_height,
+        water_height: cell.water_height.map(|h| h * convert::METERS_PER_UNIT),
     }
 }
 
 /// Spawn the terrain mesh child for an exterior cell, when its `LAND` record exists and
-/// has heights. Returns the minimum decoded terrain height in game units (it drives the
+/// has heights. Returns the minimum terrain height in meters (it drives the
 /// sea-level water decision). Cells without `LAND` — map edges, sparse plugins — skip
 /// silently: that's authored absence, not an error, and (like water) terrain doesn't
 /// count toward the seed's reference tallies.
@@ -383,7 +385,8 @@ fn spawn_terrain(
     let min = land
         .decode_heights()?
         .into_iter()
-        .fold(f32::INFINITY, f32::min);
+        .fold(f32::INFINITY, f32::min)
+        * convert::METERS_PER_UNIT;
 
     let mut terrain = commands.spawn((
         Mesh3d(meshes.add(mesh)),
@@ -567,13 +570,16 @@ fn spawn_water(
         if !has_water {
             return;
         }
-        let height = cell.water_height.unwrap_or(0.0);
-        (Vec3::new(center.x, height, center.z), 8192.0)
+        let height = cell.water_height.unwrap_or(0.0) * convert::METERS_PER_UNIT;
+        (
+            Vec3::new(center.x, height, center.z),
+            convert::CELL_SIZE_METERS,
+        )
     } else {
         if !terrain_min_height.is_some_and(|min| min < 0.0) {
             return;
         }
-        let half = CELL_SIZE / 2.0;
+        let half = convert::CELL_SIZE_METERS / 2.0;
         let corner = convert::land_transform(cell.data.grid_x, cell.data.grid_y).translation;
         (corner + Vec3::new(half, 0.0, -half), half)
     };

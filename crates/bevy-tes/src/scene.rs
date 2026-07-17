@@ -4,8 +4,8 @@
 //! [`Mesh`] per drawable `NiTriShape` (`Mesh{i}`), deduplicated [`StandardMaterial`]s
 //! (`Material{i}`) whose textures are resolved through the [`TesVfs`] and loaded as
 //! dependencies of the same `tes://` source, and a [`WorldAsset`] (`Scene`) preserving
-//! the model's node hierarchy as entities with local [`Transform`]s under a Z-up→Y-up
-//! root. This mirrors the shape of Bevy's glTF loader output.
+//! the model's node hierarchy as entities with local [`Transform`]s under a Z-up→Y-up,
+//! game-unit→meter root. This mirrors the shape of Bevy's glTF loader output.
 
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
@@ -140,7 +140,9 @@ pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>)
         }
     });
 
-    // Pass 2: spawn the recorded entities into a fresh world under a Z-up→Y-up root.
+    // Pass 2: spawn the recorded entities into a fresh world under a root that converts
+    // the whole model at once: Z-up→Y-up rotation, game-unit→meter scale. Node
+    // transforms below it stay raw NIF values.
     let mut world = World::new();
     let stem = load_context
         .path()
@@ -150,7 +152,8 @@ pub(crate) fn build(nif: &Nif, vfs: &TesVfs, load_context: &mut LoadContext<'_>)
         .unwrap_or_else(|| "Nif".to_string());
     let root = world
         .spawn((
-            Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
+            Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2))
+                .with_scale(bevy::math::Vec3::splat(convert::METERS_PER_UNIT)),
             Visibility::default(),
             Name::new(stem),
         ))

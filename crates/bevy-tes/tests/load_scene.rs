@@ -5,12 +5,16 @@
 #![cfg(feature = "scene")]
 
 use bevy::asset::{AssetServer, Assets, Handle, LoadState};
+use bevy::ecs::hierarchy::ChildOf;
+use bevy::ecs::query::Without;
 use bevy::image::{Image, ImageAddressMode, ImageSampler};
+use bevy::math::Vec3;
 use bevy::mesh::Mesh;
 use bevy::pbr::StandardMaterial;
+use bevy::transform::components::Transform;
 use bevy::world_serialization::WorldAsset;
 
-use bevy_tes::NifAsset;
+use bevy_tes::{METERS_PER_UNIT, NifAsset};
 
 mod common;
 use common::{app_with_assets, pump_until_loaded};
@@ -47,12 +51,18 @@ fn nif_load_emits_scene_meshes_and_textured_materials() {
         (nif.scene.clone(), nif.meshes.clone(), nif.materials.clone())
     };
 
+    // The scene world is present, its single root carrying the Z-up→Y-up rotation and
+    // the game-unit→meter scale (the one place the whole model converts).
+    {
+        let mut worlds = app.world_mut().resource_mut::<Assets<WorldAsset>>();
+        let scene_world = &mut worlds.get_mut(&scene).expect("scene world present").world;
+        let mut roots = scene_world.query_filtered::<&Transform, Without<ChildOf>>();
+        let root = roots.single(scene_world).expect("exactly one scene root");
+        assert_eq!(root.scale, Vec3::splat(METERS_PER_UNIT));
+    }
+
     // The labeled sub-assets resolve to real assets.
     let world = app.world();
-    assert!(
-        world.resource::<Assets<WorldAsset>>().get(&scene).is_some(),
-        "scene world present"
-    );
     let meshes = world.resource::<Assets<Mesh>>();
     for mesh in &mesh_handles {
         assert!(meshes.get(mesh).is_some(), "labeled mesh present");

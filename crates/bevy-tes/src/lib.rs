@@ -47,7 +47,9 @@
 //!
 //! Whole **cells** (interiors or exterior grid squares) spawn the same way from a loaded
 //! load order — one child entity per placed object, each loading its own NIF scene (see
-//! [`cell`]):
+//! [`cell`]). Everything spawns Y-up and **in meters** — game-frame axes and game units
+//! convert exactly once, at the [`convert`] boundary (see
+//! [`METERS_PER_UNIT`](convert::METERS_PER_UNIT)):
 //!
 //! ```ignore
 //! use bevy_tes::{CellId, CellSeed};
@@ -98,6 +100,8 @@ pub mod terrain;
 pub use cell::{
     CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
 };
+#[cfg(feature = "scene")]
+pub use convert::{CELL_SIZE_METERS, METERS_PER_UNIT};
 #[cfg(feature = "scene")]
 pub use terrain::{TerrainPlugin, TerrainSplatMaterial};
 pub use tes_loadorder::{CellId, ObjectKind, ObjectRef, TesLoadOrder};

@@ -4,6 +4,11 @@
 //! spawner (`cell` module) assemble: geometry, transforms and surface parameters, each
 //! mapped 1:1 from the parser types. The parser crates know nothing of Bevy; only this
 //! crate bridges the two.
+//!
+//! Axes and units both convert exactly once, here: the game frame is Z-up in game units
+//! (64 units = 1 yard), Bevy's PBR stack assumes Y-up meters — so every length this
+//! crate emits is in **meters** (see [`METERS_PER_UNIT`]), while the parser types keep
+//! their authored game-unit values.
 
 use bevy::asset::{Handle, RenderAssetUsages};
 use bevy::color::{Color, ColorToComponents, LinearRgba};
@@ -16,6 +21,16 @@ use bevy::transform::components::Transform;
 use tes_nif::{NifTransform, TriMesh};
 use tes3_esm::records::cell::ReferenceTransform;
 use tes3_esm::records::land::{CELL_SIZE, LAND_GRID, Land};
+
+/// Meters per game unit: Morrowind's 64 units = 1 yard (0.9144 m), ≈ 70 units/m.
+///
+/// Everything this crate hands to Bevy — reference placements, terrain, NIF scenes,
+/// light ranges, water heights — is scaled by this once, at conversion time, so the
+/// spawned world is in the meters Bevy's PBR stack assumes.
+pub const METERS_PER_UNIT: f32 = 0.9144 / 64.0;
+
+/// An exterior cell's edge length in meters (8192 game units ≈ 117 m).
+pub const CELL_SIZE_METERS: f32 = CELL_SIZE * METERS_PER_UNIT;
 
 /// Convert a `NiTriShapeData` triangle mesh into a Bevy [`Mesh`], in the shape's **local
 /// space** (the scene builder puts the transform on the entity instead).
@@ -62,41 +77,50 @@ pub fn nif_transform(t: &NifTransform) -> Transform {
     }
 }
 
-/// Convert a cell reference's placement into a Bevy Y-up [`Transform`], for an entity
-/// whose child is a NIF `#Scene`.
+/// Convert a cell reference's placement into a Bevy Y-up [`Transform`] in meters, for an
+/// entity whose child is a NIF `#Scene`.
 ///
 /// The game frame is Z-up; positions are in game units and rotations are XYZ Euler
 /// radians with the game's clockwise-positive convention (each axis rotation is applied
 /// **negated**, Z then Y then X — the same construction OpenMW uses). Every NIF `#Scene`
-/// already carries the Z-up→Y-up rotation `C` on its own root, so the game-frame rotation
-/// is *conjugated* into the Y-up frame here rather than converted per-axis: a content
-/// point `p` then passes `(C·q·C⁻¹)·C·p = C·(q·p)` — the game placement, axis-converted
-/// exactly once. `scale` is the reference's `XSCL`, clamped to the engine's `[0.5, 2.0]`.
+/// already carries the Z-up→Y-up rotation and the unit→meter scale on its own root, so
+/// the game-frame rotation `q` is *conjugated* into the Y-up frame here rather than
+/// converted per-axis: a content point `p` then passes `(C·q·C⁻¹)·C·p = C·(q·p)` — the
+/// game placement, axis-converted exactly once. `scale` is the reference's `XSCL`,
+/// clamped to the engine's `[0.5, 2.0]` — dimensionless, so it composes with the scene
+/// root's [`METERS_PER_UNIT`] rather than replacing it.
 pub fn cell_reference_transform(t: &ReferenceTransform, scale: f32) -> Transform {
     let c = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
     let [rx, ry, rz] = t.rotation;
     let q_game =
         Quat::from_rotation_x(-rx) * Quat::from_rotation_y(-ry) * Quat::from_rotation_z(-rz);
     Transform {
-        translation: c * Vec3::from(t.position), // (x, y, z) → (x, z, -y)
+        // (x, y, z) → (x, z, -y), game units → meters.
+        translation: c * Vec3::from(t.position) * METERS_PER_UNIT,
         rotation: c * q_game * c.inverse(),
         scale: Vec3::splat(scale.clamp(0.5, 2.0)),
     }
 }
 
-/// The Y-up world transform of a cell's terrain mesh: the cell's **south-west corner**
-/// mapped through the game→Bevy axis conversion `(x, y, z) → (x, z, -y)`. Pair with
-/// [`land_mesh`], which builds vertices relative to that corner.
+/// The Y-up world transform (in meters) of a cell's terrain mesh: the cell's
+/// **south-west corner** mapped through the game→Bevy axis conversion
+/// `(x, y, z) → (x, z, -y)`. Pair with [`land_mesh`], which builds vertices relative to
+/// that corner.
 pub fn land_transform(grid_x: i32, grid_y: i32) -> Transform {
-    Transform::from_xyz(grid_x as f32 * CELL_SIZE, 0.0, -(grid_y as f32) * CELL_SIZE)
+    Transform::from_xyz(
+        grid_x as f32 * CELL_SIZE_METERS,
+        0.0,
+        -(grid_y as f32) * CELL_SIZE_METERS,
+    )
 }
 
 /// Build a Bevy [`Mesh`] from a `LAND` record's vertex grids, in **cell-local Y-up**
-/// coordinates with the origin at the cell's south-west corner (pair with
+/// meters with the origin at the cell's south-west corner (pair with
 /// [`land_transform`]). `None` when the record has no decodable heights.
 ///
-/// Grid vertex `(x, y)` sits at game-frame offset `(x·128, y·128, height)` from the
-/// corner; through the axis map that is `[x·128, height, -y·128]`. Because the map is a
+/// Grid vertex `(x, y)` sits at game-frame offset `(x·128, y·128, height)` game units
+/// from the corner; through the axis and unit maps that is
+/// `[x·128, height, -y·128] · METERS_PER_UNIT`. Because the axis map is a
 /// proper rotation (determinant +1) baked entirely into the positions — including the
 /// negated z — game-frame counter-clockwise-up triangle winding carries over unchanged,
 /// so front faces point +Y and default backface culling shows the terrain from above.
@@ -110,7 +134,7 @@ pub fn land_transform(grid_x: i32, grid_y: i32) -> Transform {
 pub fn land_mesh(land: &Land) -> Option<Mesh> {
     const N: usize = LAND_GRID;
     let heights = land.decode_heights()?;
-    let spacing = CELL_SIZE / (N - 1) as f32;
+    let spacing = CELL_SIZE_METERS / (N - 1) as f32;
 
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(N * N);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(N * N);
@@ -118,7 +142,7 @@ pub fn land_mesh(land: &Land) -> Option<Mesh> {
         for x in 0..N {
             positions.push([
                 x as f32 * spacing,
-                heights[y * N + x],
+                heights[y * N + x] * METERS_PER_UNIT,
                 -(y as f32) * spacing,
             ]);
             uvs.push([x as f32 / (N - 1) as f32, 1.0 - y as f32 / (N - 1) as f32]);
@@ -295,7 +319,8 @@ mod tests {
             rotation: [0.0, 0.0, 0.0],
         };
         let out = cell_reference_transform(&t, 1.0);
-        assert!((out.translation - Vec3::new(1.0, 3.0, -2.0)).length() < 1e-6);
+        let expected = Vec3::new(1.0, 3.0, -2.0) * METERS_PER_UNIT;
+        assert!((out.translation - expected).length() < 1e-6);
         assert_quat_eq(out.rotation, Quat::IDENTITY);
     }
 
@@ -315,9 +340,11 @@ mod tests {
     #[test]
     fn cell_reference_transform_composes_with_the_nif_scene_root() {
         // Full chain check: a point in NIF model space passes the #Scene root's internal
-        // Z-up→Y-up rotation, then this transform. The result must equal the game-frame
-        // placement (rotate, scale, translate in Z-up) converted to Y-up once.
+        // Z-up→Y-up rotation and unit→meter scale, then this transform. The result must
+        // equal the game-frame placement (rotate, scale, translate in Z-up) converted to
+        // Y-up meters once.
         let c = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let scene_root = Transform::from_rotation(c).with_scale(Vec3::splat(METERS_PER_UNIT));
         let t = ReferenceTransform {
             position: [10.0, 20.0, 30.0],
             rotation: [0.1, 0.2, 0.3],
@@ -326,8 +353,8 @@ mod tests {
         let q_game =
             Quat::from_rotation_x(-0.1) * Quat::from_rotation_y(-0.2) * Quat::from_rotation_z(-0.3);
         for p in [Vec3::X, Vec3::new(0.5, -3.0, 2.0)] {
-            let got = out.transform_point(c * p);
-            let expected = c * (q_game * (2.0 * p) + Vec3::from(t.position));
+            let got = out.transform_point(scene_root.transform_point(p));
+            let expected = c * (q_game * (2.0 * p) + Vec3::from(t.position)) * METERS_PER_UNIT;
             assert!((got - expected).length() < 1e-4, "{p}: {got} vs {expected}");
         }
     }
@@ -402,10 +429,21 @@ mod tests {
             panic!("expected U32 indices");
         };
         assert_eq!(indices.len(), 64 * 64 * 6);
-        // Vertex (1, 2): east 1 step, north 2 steps, bumped 5 VHGT units = 40 game units.
-        assert_eq!(positions[2 * 65 + 1], [128.0, 40.0, -256.0]);
+        // Vertex (1, 2): east 1 step, north 2 steps, bumped 5 VHGT units = 40 game
+        // units — all scaled into meters.
+        assert_eq!(
+            positions[2 * 65 + 1],
+            [
+                128.0 * METERS_PER_UNIT,
+                40.0 * METERS_PER_UNIT,
+                -256.0 * METERS_PER_UNIT
+            ]
+        );
         // Its east neighbor is back at the base height.
-        assert_eq!(positions[2 * 65 + 2], [256.0, 0.0, -256.0]);
+        assert_eq!(
+            positions[2 * 65 + 2],
+            [256.0 * METERS_PER_UNIT, 0.0, -256.0 * METERS_PER_UNIT]
+        );
         // UVs: (64, 0) is the south-east corner → image-space bottom-right.
         let uvs = match mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap() {
             bevy::mesh::VertexAttributeValues::Float32x2(v) => v,
@@ -468,7 +506,10 @@ mod tests {
     #[test]
     fn land_transform_maps_grid_corner() {
         let t = land_transform(-3, -2);
-        assert_eq!(t.translation, Vec3::new(-24576.0, 0.0, 16384.0));
+        assert_eq!(
+            t.translation,
+            Vec3::new(-3.0 * CELL_SIZE_METERS, 0.0, 2.0 * CELL_SIZE_METERS)
+        );
     }
 
     #[test]
