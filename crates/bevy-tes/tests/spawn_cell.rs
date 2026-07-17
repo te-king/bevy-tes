@@ -24,8 +24,8 @@ use tes3_esm::records::stat::Stat;
 use tes3_esm::{Esm, EsmDirectory, L1Str, Record};
 
 use bevy_tes::{
-    CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
-    LoadOrderAsset, TerrainSplatMaterial,
+    CELL_SIZE_METERS, CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain,
+    CellWater, LoadOrderAsset, METERS_PER_UNIT, TerrainSplatMaterial,
 };
 
 mod common;
@@ -152,7 +152,8 @@ fn synthetic_cell_spawns_and_skips() {
         .iter(app.world())
         .find(|(r, _)| r.object == "Test_Stat")
         .expect("stat child exists without a resolvable model");
-    assert!((stat_transform.translation - Vec3::new(100.0, 300.0, -200.0)).length() < 1e-4);
+    let expected = Vec3::new(100.0, 300.0, -200.0) * METERS_PER_UNIT;
+    assert!((stat_transform.translation - expected).length() < 1e-4);
     assert!(
         stat_transform
             .rotation
@@ -171,7 +172,7 @@ fn synthetic_cell_spawns_and_skips() {
     let mut lights = app.world_mut().query::<(&CellReference, &PointLight)>();
     let (light_ref, light) = lights.iter(app.world()).next().expect("light child");
     assert_eq!(light_ref.object, "test_light");
-    assert_eq!(light.range, 256.0);
+    assert_eq!(light.range, 256.0 * METERS_PER_UNIT);
 
     // Interior water: one stand-in plane at the water height.
     let mut water = app
@@ -179,7 +180,7 @@ fn synthetic_cell_spawns_and_skips() {
         .query::<(&CellWater, &Transform, &ChildOf)>();
     let (_, water_transform, parent) = water.iter(app.world()).next().expect("water plane");
     assert_eq!(parent.parent(), seed);
-    assert_eq!(water_transform.translation.y, 50.0);
+    assert_eq!(water_transform.translation.y, 50.0 * METERS_PER_UNIT);
 }
 
 #[test]
@@ -351,7 +352,10 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
         .query::<(&CellTerrain, &Transform, &Mesh3d, &ChildOf)>();
     let (_, transform, mesh, parent) = terrain.iter(app.world()).next().expect("terrain child");
     assert_eq!(parent.parent(), seed);
-    assert_eq!(transform.translation, Vec3::new(8192.0, 0.0, -16384.0));
+    assert_eq!(
+        transform.translation,
+        Vec3::new(CELL_SIZE_METERS, 0.0, -2.0 * CELL_SIZE_METERS)
+    );
     let mesh = mesh.0.clone();
     let meshes = app.world().resource::<Assets<Mesh>>();
     let positions = meshes
@@ -362,7 +366,7 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
         .as_float3()
         .unwrap();
     assert_eq!(positions.len(), LAND_GRID * LAND_GRID);
-    assert_eq!(positions[0][1], -10.0 * HEIGHT_SCALE);
+    assert_eq!(positions[0][1], -10.0 * HEIGHT_SCALE * METERS_PER_UNIT);
 
     // Sunken terrain gets a sea-level plane at the cell's centre.
     let mut water = app
@@ -372,7 +376,11 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
     assert_eq!(parent.parent(), seed);
     assert_eq!(
         water_transform.translation,
-        Vec3::new(8192.0 + 4096.0, 0.0, -(16384.0 + 4096.0))
+        Vec3::new(
+            CELL_SIZE_METERS + CELL_SIZE_METERS / 2.0,
+            0.0,
+            -2.0 * CELL_SIZE_METERS - CELL_SIZE_METERS / 2.0
+        )
     );
 
     // The VTEX grid became a splat material: two distinct textures in first-appearance
@@ -563,10 +571,12 @@ fn exterior_cell_spawns_references() {
                 {
                     let land = asset.land(c.data.grid_x, c.data.grid_y)?;
                     let heights = land.decode_heights()?;
-                    // Recomputed from the raw fields, independently of decode_heights.
+                    // Recomputed from the raw fields, independently of decode_heights,
+                    // then scaled into the meters the mesh is built in.
                     let first = (land.height_offset.unwrap()
                         + (land.heights.unwrap()[0] as i8) as f32)
-                        * HEIGHT_SCALE;
+                        * HEIGHT_SCALE
+                        * METERS_PER_UNIT;
                     let min = heights.into_iter().fold(f32::INFINITY, f32::min);
                     let distinct = land
                         .decode_textures()
