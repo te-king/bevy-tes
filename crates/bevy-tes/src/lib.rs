@@ -62,6 +62,10 @@
 //! }
 //! ```
 //!
+//! To keep a *moving* anchor (a fly camera) surrounded by loaded exterior cells, put a
+//! [`CellStreamer`](streaming::CellStreamer) on it instead — cells page in and out
+//! around the anchor as it travels (see [`streaming`]).
+//!
 //! # Plugin ordering
 //!
 //! `TesPlugin` **must be added before** Bevy's `AssetPlugin` (i.e. before
@@ -94,6 +98,8 @@ pub mod convert;
 #[cfg(feature = "scene")]
 mod scene;
 #[cfg(feature = "scene")]
+pub mod streaming;
+#[cfg(feature = "scene")]
 pub mod terrain;
 
 #[cfg(feature = "scene")]
@@ -102,6 +108,8 @@ pub use cell::{
 };
 #[cfg(feature = "scene")]
 pub use convert::{CELL_SIZE_METERS, METERS_PER_UNIT};
+#[cfg(feature = "scene")]
+pub use streaming::CellStreamer;
 #[cfg(feature = "scene")]
 pub use terrain::{TerrainPlugin, TerrainSplatMaterial};
 pub use tes_loadorder::{CellId, ObjectKind, ObjectRef, TesLoadOrder};
@@ -429,7 +437,12 @@ impl Plugin for TesPlugin {
             init_asset_if_missing::<bevy::mesh::Mesh>(app);
             init_asset_if_missing::<bevy::pbr::StandardMaterial>(app);
             init_asset_if_missing::<bevy::world_serialization::WorldAsset>(app);
-            app.add_systems(bevy::app::Update, cell::spawn_cells);
+            // Chained so a cell paged in by a streamer resolves the same frame.
+            use bevy::ecs::schedule::IntoScheduleConfigs;
+            app.add_systems(
+                bevy::app::Update,
+                (streaming::page_cells, cell::spawn_cells).chain(),
+            );
         }
     }
 }

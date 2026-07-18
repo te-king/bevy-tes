@@ -4,6 +4,7 @@
 //! ```text
 //! cargo run --release -p bevy-render-cell -- "Balmora, Guild of Mages"
 //! cargo run --release -p bevy-render-cell -- --exterior=-3,-2
+//! cargo run --release -p bevy-render-cell -- --stream --exterior=-3,-2
 //! ```
 //!
 //! By default this waits until the cell's models have streamed in, frames the scene,
@@ -12,7 +13,9 @@
 //! `--load-order <file>` for a multi-plugin load order read from a plain-text file (one
 //! plugin per line, earliest first), or `--interactive` for a live window with Bevy's
 //! free camera (hold RMB to look, WASD to fly, E/Q up/down, Shift to run, scroll for
-//! speed).
+//! speed). `--stream` (implies `--interactive`) skips the single-cell staging entirely:
+//! the camera starts over the given exterior grid square with a `CellStreamer`, and
+//! cells page in and out around it as it flies.
 //!
 //! Cell resolution, reference placement, light spawning and NIF/texture loading all
 //! happen inside `bevy_tes`; this binary stages a camera and lighting around the
@@ -40,8 +43,8 @@ use bevy::window::{ExitCondition, WindowResolution};
 use clap::Parser;
 
 use bevy_tes::{
-    CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned, LoadOrderHandle,
-    TerrainPlugin, TesPlugin,
+    CELL_SIZE_METERS, CellEnvironment, CellId, CellSeed, CellSpawnFailed, CellSpawned,
+    CellStreamer, LoadOrderHandle, TerrainPlugin, TesPlugin,
 };
 
 /// Render a TES3 cell with Bevy.
@@ -77,6 +80,11 @@ struct Args {
     /// Open a live window with a fly camera instead of capturing a single screenshot.
     #[arg(long)]
     interactive: bool,
+
+    /// Stream exterior cells around the fly camera as it moves, starting over the
+    /// `--exterior` grid square. Implies `--interactive`.
+    #[arg(long, requires = "exterior", conflicts_with = "output")]
+    stream: bool,
 }
 
 /// How many consecutive frames the drawable-mesh count must hold still before the scene
@@ -135,7 +143,7 @@ fn main() -> ExitCode {
     // TesPlugin must precede DefaultPlugins: asset sources register before AssetPlugin.
     app.add_plugins(TesPlugin::new(args.data.clone()).with_plugins(plugins));
 
-    if args.interactive {
+    if args.interactive || args.stream {
         app.add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: format!("render_cell — {title}"),
@@ -173,18 +181,56 @@ fn main() -> ExitCode {
         .add_systems(Update, capture);
     }
 
-    app.init_resource::<Framed>()
-        .add_systems(
+    if args.stream {
+        // Clap guarantees --exterior, so the cell is always an exterior grid square.
+        let CellId::Exterior { x, y } = cell else {
+            unreachable!("--stream requires --exterior")
+        };
+        app.add_systems(
             Startup,
-            // TesPlugin finished before Startup, so the load-order handle exists.
-            move |mut commands: Commands, load_order: Res<LoadOrderHandle>| {
-                commands.spawn(CellSeed {
-                    load_order: load_order.0.clone(),
-                    cell: cell.clone(),
-                });
+            // TesPlugin finished before Startup, so the load-order handle exists. No
+            // seed and no settle-then-frame pass: the start position is known, and the
+            // streamer pages cells in around the camera from frame one.
+            move |mut commands: Commands,
+                  load_order: Res<LoadOrderHandle>,
+                  mut scattering_mediums: ResMut<Assets<ScatteringMedium>>| {
+                spawn_atmosphere(&mut commands, &mut scattering_mediums);
+                commands.spawn(sun(STREAM_SHADOW_DISTANCE));
+                let center = Vec3::new(
+                    (x as f32 + 0.5) * CELL_SIZE_METERS,
+                    0.0,
+                    -(y as f32 + 0.5) * CELL_SIZE_METERS,
+                );
+                let transform = Transform::from_translation(center + Vec3::new(0.0, 30.0, 60.0))
+                    .looking_at(center, Vec3::Y);
+                commands.spawn((
+                    // Exterior ambient is zero (sky-lit), as in frame_cell.
+                    camera_rig(
+                        transform,
+                        AmbientLight {
+                            brightness: 0.0,
+                            ..default()
+                        },
+                    ),
+                    FreeCamera::default(),
+                    CellStreamer::new(load_order.0.clone()),
+                ));
             },
-        )
-        .add_systems(Update, frame_cell);
+        );
+    } else {
+        app.init_resource::<Framed>()
+            .add_systems(
+                Startup,
+                // TesPlugin finished before Startup, so the load-order handle exists.
+                move |mut commands: Commands, load_order: Res<LoadOrderHandle>| {
+                    commands.spawn(CellSeed {
+                        load_order: load_order.0.clone(),
+                        cell: cell.clone(),
+                    });
+                },
+            )
+            .add_systems(Update, frame_cell);
+    }
 
     match app.run() {
         AppExit::Success => ExitCode::SUCCESS,
@@ -196,6 +242,87 @@ fn main() -> ExitCode {
 fn parse_grid(s: &str) -> Option<(i32, i32)> {
     let (x, y) = s.split_once(',')?;
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
+/// Sun-shadow reach in `--stream` mode: the framing heuristic's `r * 4` has no `r`
+/// here, so use roughly the streamer's default page-in radius — everything loaded gets
+/// sharp shadows, and the cascades aren't stretched over unloaded distance.
+const STREAM_SHADOW_DISTANCE: f32 = 300.0;
+
+/// Procedural sky: one earth-like atmosphere (the world is in meters, so no scaling).
+/// The planet center sits `inner_radius` below the origin so the world sits on its
+/// surface. The sky's look is driven by the directional sun. Staged for interiors and
+/// exteriors alike — an interior only shows it through door gaps, and per-kind tuning
+/// can come later.
+fn spawn_atmosphere(commands: &mut Commands, scattering_mediums: &mut Assets<ScatteringMedium>) {
+    let atmosphere = Atmosphere::earth(scattering_mediums.add(ScatteringMedium::earth(256, 256)));
+    commands.spawn((
+        Transform::from_translation(-Vec3::Y * atmosphere.inner_radius),
+        atmosphere,
+    ));
+}
+
+/// The camera stack shared by every mode: an HDR sky camera with the full
+/// post-processing chain, differing only in placement and ambient term.
+fn camera_rig(transform: Transform, ambient: AmbientLight) -> impl Bundle {
+    (
+        Camera3d::default(),
+        transform,
+        // The far plane covers the whole landmass (~5 km across) for later distant-land
+        // work; the default 1000 m would clip a long exterior view.
+        Projection::Perspective(PerspectiveProjection {
+            near: 0.1,
+            far: 5_000.0,
+            ..default()
+        }),
+        ambient,
+        // Renders the sky (and implies an HDR camera); bloom gives the sun a disk.
+        AtmosphereSettings::default(),
+        Bloom::NATURAL,
+        // Sky-driven image-based lighting: ambient diffuse comes from the atmosphere's
+        // generated environment map (blue from above, responding to sun angle).
+        AtmosphereEnvironmentMapLight::default(),
+        // Contact shadows in clutter and under eaves. Requires (and auto-adds) the
+        // depth/normal prepasses; both SSAO and TAA require MSAA off.
+        ScreenSpaceAmbientOcclusion::default(),
+        // Alpha-masked vegetation shimmers under MSAA (it can't help alpha-tested
+        // edges); TAA resolves those. Converges over a few frames — screenshot mode
+        // waits for it. CAS recovers the crispness TAA softens away.
+        TemporalAntiAliasing::default(),
+        Msaa::Off,
+        ContrastAdaptiveSharpening::default(),
+        // Softer sun-shadow edges, using the TAA-aware filter.
+        ShadowFilteringMethod::Temporal,
+        // Punchier filmic tonemapper than the default TonyMcMapface.
+        Tonemapping::AcesFitted,
+        // Eye adaptation: meters the frame and drifts exposure toward mid-grey, so the
+        // shared interior/exterior staging each land at a sane brightness. Adapts over
+        // ~a second — screenshot mode waits for it too. Metering only the brighter
+        // half of the histogram keeps the moody, darker-than-mid-grey look from being
+        // "corrected" into overexposure.
+        AutoExposure {
+            filter: 0.50..=0.95,
+            ..default()
+        },
+    )
+}
+
+/// The exterior key light: a shadow-casting sun, with cascades reaching
+/// `maximum_distance`.
+fn sun(maximum_distance: f32) -> impl Bundle {
+    (
+        DirectionalLight {
+            illuminance: 6_000.0,
+            shadow_maps_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(1.0, 2.0, 1.5).looking_at(Vec3::ZERO, Vec3::Y),
+        CascadeShadowConfigBuilder {
+            maximum_distance,
+            ..default()
+        }
+        .build(),
+    )
 }
 
 /// Once the cell has spawned and its models have settled, stage the set: camera framed
@@ -297,57 +424,9 @@ fn frame_cell(
         Transform::from_translation(center + Vec3::new(r * 0.7, r * 0.8, r * 0.7))
             .looking_at(center, Vec3::Y)
     };
-    // Procedural sky: one earth-like atmosphere (the world is in meters, so no scaling).
-    // The planet center sits `inner_radius` below the origin so the world sits on its
-    // surface. The sky's look is driven by the directional sun below. Staged for
-    // interiors and exteriors alike — an interior only shows it through door gaps, and
-    // per-kind tuning can come later.
-    let atmosphere = Atmosphere::earth(scattering_mediums.add(ScatteringMedium::earth(256, 256)));
-    commands.spawn((
-        Transform::from_translation(-Vec3::Y * atmosphere.inner_radius),
-        atmosphere,
-    ));
+    spawn_atmosphere(&mut commands, &mut scattering_mediums);
 
-    let mut camera = commands.spawn((
-        Camera3d::default(),
-        camera_transform,
-        // The far plane covers the whole landmass (~5 km across) for later distant-land
-        // work; the default 1000 m would clip a long exterior view.
-        Projection::Perspective(PerspectiveProjection {
-            near: 0.1,
-            far: 5_000.0,
-            ..default()
-        }),
-        ambient,
-        // Renders the sky (and implies an HDR camera); bloom gives the sun a disk.
-        AtmosphereSettings::default(),
-        Bloom::NATURAL,
-        // Sky-driven image-based lighting: ambient diffuse comes from the atmosphere's
-        // generated environment map (blue from above, responding to sun angle).
-        AtmosphereEnvironmentMapLight::default(),
-        // Contact shadows in clutter and under eaves. Requires (and auto-adds) the
-        // depth/normal prepasses; both SSAO and TAA require MSAA off.
-        ScreenSpaceAmbientOcclusion::default(),
-        // Alpha-masked vegetation shimmers under MSAA (it can't help alpha-tested
-        // edges); TAA resolves those. Converges over a few frames — screenshot mode
-        // waits for it. CAS recovers the crispness TAA softens away.
-        TemporalAntiAliasing::default(),
-        Msaa::Off,
-        ContrastAdaptiveSharpening::default(),
-        // Softer sun-shadow edges, using the TAA-aware filter.
-        ShadowFilteringMethod::Temporal,
-        // Punchier filmic tonemapper than the default TonyMcMapface.
-        Tonemapping::AcesFitted,
-        // Eye adaptation: meters the frame and drifts exposure toward mid-grey, so the
-        // shared interior/exterior staging each land at a sane brightness. Adapts over
-        // ~a second — screenshot mode waits for it too. Metering only the brighter
-        // half of the histogram keeps the moody, darker-than-mid-grey look from being
-        // "corrected" into overexposure.
-        AutoExposure {
-            filter: 0.50..=0.95,
-            ..default()
-        },
-    ));
+    let mut camera = commands.spawn(camera_rig(camera_transform, ambient));
     if capture.is_none() {
         // Bevy's free camera; the controller logs its controls on the first frame. The
         // world is in meters, so the metric default speeds fit (scroll rescales them).
@@ -355,19 +434,7 @@ fn frame_cell(
     }
 
     if !environment.interior {
-        commands.spawn((
-            DirectionalLight {
-                illuminance: 6_000.0,
-                shadow_maps_enabled: true,
-                ..default()
-            },
-            Transform::from_xyz(1.0, 2.0, 1.5).looking_at(Vec3::ZERO, Vec3::Y),
-            CascadeShadowConfigBuilder {
-                maximum_distance: r * 4.0,
-                ..default()
-            }
-            .build(),
-        ));
+        commands.spawn(sun(r * 4.0));
     }
 
     println!(
