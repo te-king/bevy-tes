@@ -94,6 +94,8 @@ pub mod tes_vfs;
 #[cfg(feature = "scene")]
 pub mod cell;
 #[cfg(feature = "scene")]
+mod cell_build;
+#[cfg(feature = "scene")]
 pub mod convert;
 #[cfg(feature = "scene")]
 mod scene;
@@ -146,9 +148,12 @@ pub struct LoadOrderHandle(pub Handle<LoadOrderAsset>);
 /// Loading a plugin file directly (`asset_server.load("tes://Morrowind.esm")`) yields a
 /// one-plugin load order; [`TesPlugin::with_plugins`] builds the app's full load order
 /// and shares it as [`LoadOrderHandle`].
+///
+/// The load order is behind an [`Arc`] so background tasks can read it without
+/// borrowing `Assets` — see [`LoadOrderAsset::shared`].
 #[derive(Asset, TypePath)]
 pub struct LoadOrderAsset {
-    load_order: TesLoadOrder,
+    load_order: Arc<TesLoadOrder>,
 }
 
 impl LoadOrderAsset {
@@ -156,16 +161,14 @@ impl LoadOrderAsset {
     /// alive inside the asset; the parsed records borrow them.
     pub fn parse(bytes: Vec<u8>) -> Result<LoadOrderAsset, EsmError> {
         let esm = Esm::parse(bytes)?;
-        Ok(LoadOrderAsset {
-            load_order: TesLoadOrder::from_esms(vec![esm]),
-        })
+        Ok(LoadOrderAsset::from_esms(vec![esm]))
     }
 
     /// Build a load order from already-parsed plugins, earliest first (later plugins
     /// override earlier ones on id/grid collision).
     pub fn from_esms(esms: Vec<Esm>) -> LoadOrderAsset {
         LoadOrderAsset {
-            load_order: TesLoadOrder::from_esms(esms),
+            load_order: Arc::new(TesLoadOrder::from_esms(esms)),
         }
     }
 
@@ -178,6 +181,12 @@ impl LoadOrderAsset {
     /// The load order backing this asset.
     pub fn load_order(&self) -> &TesLoadOrder {
         &self.load_order
+    }
+
+    /// A shared handle to the load order, for reading it outside the ECS — e.g. from a
+    /// background task that outlives this frame's borrow of `Assets<LoadOrderAsset>`.
+    pub fn shared(&self) -> Arc<TesLoadOrder> {
+        self.load_order.clone()
     }
 
     /// Look up a placeable object by editor id (any case).

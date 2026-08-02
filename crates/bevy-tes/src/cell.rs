@@ -15,6 +15,11 @@
 //! });
 //! ```
 //!
+//! The work splits in two: the `cell_build` module turns the cell record into an owned,
+//! ECS-free plan (all the CPU work — reference resolution, terrain mesh building,
+//! texture path resolution), and this module applies the plan — spawning entities and
+//! starting the asset loads it names.
+//!
 //! Exterior cells also grow a terrain child tagged [`CellTerrain`] — a mesh built from
 //! the cell's `LAND` record (65×65 vertex heights, normals and colors) — plus a sea-level
 //! water plane when the terrain dips below height 0. When
@@ -27,13 +32,12 @@
 //! yet), leveled-creature/item spawn points (they need runtime list resolution),
 //! references flagged disabled, and `moved_references` (correct handling needs
 //! multi-plugin merging — in a single vanilla ESM they don't occur). Lights spawn a
-//! [`PointLight`] (plus their model, when they have one); interiors with water get a
-//! translucent stand-in plane tagged [`CellWater`]. Ambient/fog values are surfaced on
-//! the seed as [`CellEnvironment`] for the app to apply — Bevy's ambient light is
-//! per-camera, so the library doesn't force it.
+//! [`PointLight`](bevy::light::PointLight) (plus their model, when they have one);
+//! interiors with water get a translucent stand-in plane tagged [`CellWater`].
+//! Ambient/fog values are surfaced on the seed as [`CellEnvironment`] for the app to
+//! apply — Bevy's ambient light is per-camera, so the library doesn't force it.
 
-use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use bevy::asset::{AssetServer, Assets, Handle};
 use bevy::camera::visibility::Visibility;
@@ -47,30 +51,19 @@ use bevy::ecs::system::{Commands, Local, Query, Res, ResMut};
 use bevy::image::{
     Image, ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
 };
-use bevy::light::PointLight;
 use bevy::material::AlphaMode;
+use bevy::math::Vec2;
 use bevy::math::primitives::Plane3d;
-use bevy::math::{Vec2, Vec3};
 use bevy::mesh::{Mesh, Mesh3d};
 use bevy::pbr::{MeshMaterial3d, StandardMaterial};
 use bevy::render::renderer::RenderDevice;
 use bevy::transform::components::Transform;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
-use tes3_esm::records::cell::{Cell, CellFlags, Reference};
-use tes3_esm::records::land::{Land, VTEX_GRID};
-use tes3_esm::records::ligh::LightFlags;
 
-use crate::terrain::{self, MAX_TERRAIN_LAYERS, TerrainSplatMaterial};
-use crate::tes_loadorder::{CellId, ObjectKind};
-use crate::{LoadOrderAsset, TesVfsHandle, convert};
-
-/// Point-light lumens per meter² of light range. A documented heuristic, not game data:
-/// Morrowind's fixed-function attenuation doesn't translate to physical units, so this
-/// is chosen so a radius-256 torch (range ≈ 3.7 m) reads correctly. Scaling intensity
-/// with the *square* of the range keeps the illuminance at any given fraction of the
-/// range constant across light sizes. The absolute values are far above physical lumens
-/// (the viewers meter exposure automatically); a physical retune is future work.
-const LIGHT_INTENSITY_PER_METER_SQ: f32 = 20_000.0;
+use crate::cell_build::{CellPlan, SplatPlan, build_cell};
+use crate::terrain::{self, TerrainSplatMaterial};
+use crate::tes_loadorder::CellId;
+use crate::{LoadOrderAsset, TesVfsHandle};
 
 /// Asks for a cell's contents to be spawned as children of this entity, once
 /// `load_order` finishes loading. One-shot: the seed entity is tagged [`CellSpawned`]
@@ -139,8 +132,8 @@ type PendingSeeds<'w, 's> =
     Query<'w, 's, (Entity, &'static CellSeed), (Without<CellSpawned>, Without<CellSpawnFailed>)>;
 
 /// Resolves pending [`CellSeed`]s and spawns their cells. Registered by `TesPlugin`
-/// under the `scene` feature; polls until each seed's load order loads, then spawns
-/// once.
+/// under the `scene` feature; polls until each seed's load order loads, then builds the
+/// cell's plan (`cell_build`) and applies it once.
 ///
 /// Terrain is texture-splatted when `Assets<TerrainSplatMaterial>` exists (i.e.
 /// [`TerrainPlugin`](crate::TerrainPlugin) — or a test harness — registered it) and the
@@ -180,422 +173,178 @@ pub fn spawn_cells(
             }
             continue; // still loading; try again next frame
         };
-        let Some(cell) = load_order.cell(&seed.cell) else {
-            eprintln!("bevy-tes: cell {:?} not found in the load order", seed.cell);
-            commands
-                .entity(seed_entity)
-                .insert(CellSpawnFailed(format!("no such cell: {:?}", seed.cell)));
-            continue;
+        let plan = match build_cell(load_order.load_order(), &vfs.0, &seed.cell) {
+            Ok(plan) => plan,
+            Err(reason) => {
+                eprintln!("bevy-tes: {reason} (for {:?})", seed.cell);
+                commands.entity(seed_entity).insert(CellSpawnFailed(reason));
+                continue;
+            }
         };
-
-        let mut spawner = CellSpawner {
-            commands: &mut commands,
-            load_order,
-            asset_server: &asset_server,
-            vfs: &vfs,
-            warned: &mut warned,
-            seed_entity,
-            spawned: 0,
-            skipped: 0,
-            position_sum: Vec3::ZERO,
-        };
-        for reference in load_order.references(&seed.cell) {
-            spawner.spawn_reference(reference);
-        }
-        if !cell.moved_references.is_empty() {
-            // MVRF relocates references defined by another plugin; meaningless without
-            // multi-plugin merging (future work) and absent from single vanilla ESMs.
-            eprintln!(
-                "bevy-tes: skipping {} moved references in {:?}",
-                cell.moved_references.len(),
-                seed.cell
-            );
-        }
-        let (spawned, skipped) = (spawner.spawned, spawner.skipped);
-        let center = spawner.position_sum / spawned.max(1) as f32;
-
-        let terrain_min_height = if cell.data.flags.contains(CellFlags::INTERIOR) {
-            None
-        } else {
-            spawn_terrain(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut terrain_material,
-                splat_materials.as_deref_mut().filter(|_| splat_supported),
-                &asset_server,
-                &vfs,
-                &mut images,
-                &mut missing_layer,
-                &mut warned,
-                seed_entity,
-                load_order,
-                cell.data.grid_x,
-                cell.data.grid_y,
-            )
-        };
-        spawn_water(
+        apply_plan(
             &mut commands,
+            seed_entity,
+            &seed.cell,
+            plan,
+            &asset_server,
             &mut meshes,
             &mut materials,
-            seed_entity,
-            cell,
-            center,
-            terrain_min_height,
+            &mut images,
+            splat_materials.as_deref_mut().filter(|_| splat_supported),
+            &mut warned,
+            &mut terrain_material,
+            &mut missing_layer,
         );
-        commands
-            .entity(seed_entity)
-            .insert((environment(cell), CellSpawned { spawned, skipped }));
     }
 }
 
-/// Per-cell spawn pass: walks the reference list, spawning children under the seed.
-struct CellSpawner<'a, 'w, 's> {
-    commands: &'a mut Commands<'w, 's>,
-    load_order: &'a LoadOrderAsset,
-    asset_server: &'a AssetServer,
-    vfs: &'a TesVfsHandle,
-    /// Ids/models already warned about, shared across cells and frames.
-    warned: &'a mut HashSet<String>,
+/// Apply a built [`CellPlan`] under the seed entity: spawn the planned children and
+/// start the asset loads the plan's paths name. The main-thread half of cell spawning —
+/// everything here needs `Commands`, the `AssetServer` or an `Assets` collection.
+#[allow(clippy::too_many_arguments)]
+fn apply_plan(
+    commands: &mut Commands,
     seed_entity: Entity,
-    spawned: usize,
-    skipped: usize,
-    /// Sum of spawned children's (Y-up) translations, for centring the water plane.
-    position_sum: Vec3,
-}
-
-impl CellSpawner<'_, '_, '_> {
-    fn spawn_reference(&mut self, reference: &Reference) {
-        let object_id = reference.object.decode().into_owned();
-        let Some(info) = self.load_order.object(&object_id) else {
-            if self.warned.insert(object_id.clone()) {
-                eprintln!("bevy-tes: cell references unknown object id {object_id:?}");
-            }
-            self.skipped += 1;
-            return;
-        };
-        // Skinned models and runtime-resolved spawn points aren't supported yet; a
-        // disabled reference is authored not to appear.
-        let unsupported = matches!(
-            info.kind(),
-            ObjectKind::Npc
-                | ObjectKind::Creature
-                | ObjectKind::BodyPart
-                | ObjectKind::LeveledCreature
-                | ObjectKind::LeveledItem
-        );
-        if unsupported || reference.disabled.is_some() {
-            self.skipped += 1;
-            return;
+    cell: &CellId,
+    plan: CellPlan,
+    asset_server: &AssetServer,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    splat_materials: Option<&mut Assets<TerrainSplatMaterial>>,
+    warned: &mut HashSet<String>,
+    terrain_material: &mut Option<Handle<StandardMaterial>>,
+    missing_layer: &mut Option<Handle<Image>>,
+) {
+    // The plan's warnings deduplicate across cells and frames by key, so a model or
+    // texture missing from many cells warns once per app run.
+    for warning in &plan.warnings {
+        if warned.insert(warning.key.clone()) {
+            eprintln!("bevy-tes: {}", warning.message);
         }
+    }
+    if plan.moved_references > 0 {
+        // MVRF relocates references defined by another plugin; meaningless without
+        // multi-plugin merging (future work) and absent from single vanilla ESMs.
+        eprintln!(
+            "bevy-tes: skipping {} moved references in {cell:?}",
+            plan.moved_references
+        );
+    }
 
-        let transform = reference
-            .transform
-            .as_ref()
-            .map(|t| convert::cell_reference_transform(t, reference.scale.unwrap_or(1.0)))
-            .unwrap_or_default();
-        self.position_sum += transform.translation;
-
-        let mut child = self.commands.spawn((
-            transform,
+    let (spawned, skipped) = (plan.references.len(), plan.skipped);
+    for reference in plan.references {
+        let mut child = commands.spawn((
+            reference.transform,
             Visibility::default(),
-            Name::new(object_id.clone()),
+            Name::new(reference.object.clone()),
             CellReference {
                 id: reference.id,
-                object: object_id.clone(),
+                object: reference.object,
             },
-            ChildOf(self.seed_entity),
+            ChildOf(seed_entity),
         ));
+        if let Some(path) = reference.model_path {
+            child.insert(WorldAssetRoot(
+                asset_server.load::<WorldAsset>(format!("tes://{path}#Scene")),
+            ));
+        }
+        if let Some(light) = reference.light {
+            child.insert(light);
+        }
+    }
 
-        if let Some(model) = info.model() {
-            let decoded = model.decode();
-            match self.vfs.0.resolve_model(&decoded) {
-                Some(path) => {
-                    child.insert(WorldAssetRoot(
-                        self.asset_server
-                            .load::<WorldAsset>(format!("tes://{path}#Scene")),
-                    ));
-                }
-                None => {
-                    if self.warned.insert(decoded.into_owned()) {
-                        eprintln!("bevy-tes: cannot resolve model {model} (for {object_id:?})");
-                    }
-                }
+    if let Some(terrain_plan) = plan.terrain {
+        let mut terrain = commands.spawn((
+            Mesh3d(meshes.add(terrain_plan.mesh)),
+            terrain_plan.transform,
+            Visibility::default(),
+            Name::new(terrain_plan.name),
+            CellTerrain,
+            ChildOf(seed_entity),
+        ));
+        let splat = splat_materials.and_then(|splats| {
+            let splat = terrain_plan.splat?;
+            Some(splats.add(splat_material(splat, asset_server, images, missing_layer)))
+        });
+        match splat {
+            Some(material) => {
+                terrain.insert(MeshMaterial3d(material));
             }
-        }
-
-        if let Some(light) = info.light()
-            && !light
-                .flags
-                .intersects(LightFlags::NEGATIVE | LightFlags::OFF_BY_DEFAULT)
-        {
-            let range = light.radius as f32 * convert::METERS_PER_UNIT;
-            child.insert(PointLight {
-                color: Color::srgb_u8(light.color.r, light.color.g, light.color.b),
-                intensity: LIGHT_INTENSITY_PER_METER_SQ * range * range,
-                range,
-                ..Default::default()
-            });
-        }
-
-        self.spawned += 1;
-    }
-}
-
-/// The cell's `AMBI`/water staging values as a [`CellEnvironment`].
-fn environment(cell: &Cell) -> CellEnvironment {
-    let srgb = |c: tes_core::math::Color| Color::srgb_u8(c.r, c.g, c.b);
-    CellEnvironment {
-        interior: cell.data.flags.contains(CellFlags::INTERIOR),
-        ambient: cell.ambient.map(|a| srgb(a.ambient)),
-        sunlight: cell.ambient.map(|a| srgb(a.sunlight)),
-        fog: cell.ambient.map(|a| (srgb(a.fog), a.fog_density)),
-        water_height: cell.water_height.map(|h| h * convert::METERS_PER_UNIT),
-    }
-}
-
-/// Spawn the terrain mesh child for an exterior cell, when its `LAND` record exists and
-/// has heights. Returns the minimum terrain height in meters (it drives the
-/// sea-level water decision). Cells without `LAND` — map edges, sparse plugins — skip
-/// silently: that's authored absence, not an error, and (like water) terrain doesn't
-/// count toward the seed's reference tallies.
-///
-/// With `splat_materials` present (the caller's splat gate), a `LAND` with a `VTEX` grid
-/// gets a per-cell [`TerrainSplatMaterial`]; otherwise the shared vertex-tinted white
-/// material.
-#[allow(clippy::too_many_arguments)]
-fn spawn_terrain(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    terrain_material: &mut Option<Handle<StandardMaterial>>,
-    splat_materials: Option<&mut Assets<TerrainSplatMaterial>>,
-    asset_server: &AssetServer,
-    vfs: &TesVfsHandle,
-    images: &mut Assets<Image>,
-    missing_layer: &mut Option<Handle<Image>>,
-    warned: &mut HashSet<String>,
-    seed_entity: Entity,
-    load_order: &LoadOrderAsset,
-    grid_x: i32,
-    grid_y: i32,
-) -> Option<f32> {
-    let land = load_order.land(grid_x, grid_y)?;
-    let mesh = convert::land_mesh(land)?;
-    let min = land
-        .decode_heights()?
-        .into_iter()
-        .fold(f32::INFINITY, f32::min)
-        * convert::METERS_PER_UNIT;
-
-    let mut terrain = commands.spawn((
-        Mesh3d(meshes.add(mesh)),
-        convert::land_transform(grid_x, grid_y),
-        Visibility::default(),
-        Name::new(format!("Terrain {grid_x},{grid_y}")),
-        CellTerrain,
-        ChildOf(seed_entity),
-    ));
-    let splat = splat_materials.and_then(|splats| {
-        let material = splat_material(
-            land,
-            load_order,
-            asset_server,
-            vfs,
-            images,
-            missing_layer,
-            warned,
-        )?;
-        Some(splats.add(material))
-    });
-    match splat {
-        Some(material) => {
-            terrain.insert(MeshMaterial3d(material));
-        }
-        None => {
-            // All cells share one matte white material; the LAND vertex colors carry
-            // the tint.
-            let material = terrain_material
-                .get_or_insert_with(|| {
-                    materials.add(StandardMaterial {
-                        base_color: Color::WHITE,
-                        perceptual_roughness: 1.0,
-                        ..Default::default()
+            None => {
+                // All cells share one matte white material; the LAND vertex colors carry
+                // the tint.
+                let material = terrain_material
+                    .get_or_insert_with(|| {
+                        materials.add(StandardMaterial {
+                            base_color: Color::WHITE,
+                            perceptual_roughness: 1.0,
+                            ..Default::default()
+                        })
                     })
-                })
-                .clone();
-            terrain.insert(MeshMaterial3d(material));
+                    .clone();
+                terrain.insert(MeshMaterial3d(material));
+            }
         }
     }
-    Some(min)
+
+    if let Some(water) = plan.water {
+        commands.spawn((
+            Mesh3d(meshes.add(Mesh::from(Plane3d::new(
+                bevy::math::Vec3::Y,
+                Vec2::splat(water.half_size),
+            )))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgba(0.1, 0.3, 0.5, 0.6),
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                ..Default::default()
+            })),
+            Transform::from_translation(water.center),
+            Visibility::default(),
+            Name::new("Water"),
+            CellWater,
+            ChildOf(seed_entity),
+        ));
+    }
+
+    commands
+        .entity(seed_entity)
+        .insert((plan.environment, CellSpawned { spawned, skipped }));
 }
 
-/// Build a cell's [`TerrainSplatMaterial`] from its `VTEX` grid: distinct texture values
-/// become binding-array layers in first-appearance order, and every texel gets its
-/// layer slot. `None` when the `LAND` has no (valid) `VTEX` grid.
-///
-/// Value 0 means the engine's default land texture; any other value refers to the
-/// `LTEX` record with index value − 1. Textures that don't resolve — missing `LTEX`,
-/// file not in the VFS — warn once and bind a white stand-in, so one bad reference
-/// can't hold up the whole cell. Cells with more than [`MAX_TERRAIN_LAYERS`] distinct
-/// textures (never in vanilla data) remap the overflow to layer 0.
+/// Turn a [`SplatPlan`] into a [`TerrainSplatMaterial`] by starting the layer texture
+/// loads; unresolvable layers bind the shared white stand-in. Load settings mirror the
+/// NIF loader's texture loads (sRGB, repeat) so a texture shared between terrain and
+/// models isn't requested with conflicting settings.
 fn splat_material(
-    land: &Land,
-    load_order: &LoadOrderAsset,
+    splat: SplatPlan,
     asset_server: &AssetServer,
-    vfs: &TesVfsHandle,
     images: &mut Assets<Image>,
     missing_layer: &mut Option<Handle<Image>>,
-    warned: &mut HashSet<String>,
-) -> Option<TerrainSplatMaterial> {
-    let grid = land.decode_textures()?;
-    let mut slots: HashMap<u16, u32> = HashMap::new();
-    let mut layers: Vec<Handle<Image>> = Vec::new();
-    let mut indices = [0u32; VTEX_GRID * VTEX_GRID];
-    for (texel, &value) in grid.iter().enumerate() {
-        let slot = match slots.get(&value) {
-            Some(&slot) => slot,
-            None => {
-                let slot = if layers.len() < MAX_TERRAIN_LAYERS {
-                    layers.push(layer_texture(
-                        value,
-                        load_order,
-                        asset_server,
-                        vfs,
-                        images,
-                        missing_layer,
-                        warned,
-                    ));
-                    (layers.len() - 1) as u32
-                } else {
-                    warn_once(
-                        warned,
-                        format!(
-                            "cell {},{} uses more than {MAX_TERRAIN_LAYERS} land textures",
-                            land.grid_x, land.grid_y
-                        ),
-                    );
-                    0
-                };
-                slots.insert(value, slot);
-                slot
-            }
-        };
-        indices[texel] = slot;
+) -> TerrainSplatMaterial {
+    let layers = splat
+        .layers
+        .into_iter()
+        .map(|layer| match layer {
+            Some(path) => asset_server
+                .load_builder()
+                .with_settings(|s: &mut ImageLoaderSettings| {
+                    s.is_srgb = true;
+                    let mut sampler = ImageSamplerDescriptor::default();
+                    sampler.set_address_mode(ImageAddressMode::Repeat);
+                    s.sampler = ImageSampler::Descriptor(sampler);
+                })
+                .load(format!("tes://{path}")),
+            // The shared 1×1 white stand-in ([`Image::default`] is all-white).
+            None => missing_layer
+                .get_or_insert_with(|| images.add(Image::default()))
+                .clone(),
+        })
+        .collect();
+    TerrainSplatMaterial {
+        layers,
+        indices: splat.indices,
     }
-    Some(TerrainSplatMaterial { layers, indices })
-}
-
-/// Start the image load for one `VTEX` value, resolving it through `LTEX` and the VFS.
-/// Load settings mirror the NIF loader's texture loads (sRGB, repeat) so a texture
-/// shared between terrain and models isn't requested with conflicting settings.
-fn layer_texture(
-    value: u16,
-    load_order: &LoadOrderAsset,
-    asset_server: &AssetServer,
-    vfs: &TesVfsHandle,
-    images: &mut Assets<Image>,
-    missing_layer: &mut Option<Handle<Image>>,
-    warned: &mut HashSet<String>,
-) -> Handle<Image> {
-    let name = if value == 0 {
-        // No explicit texture: the engine's hardcoded default.
-        Cow::Borrowed("_land_default.tga")
-    } else {
-        match load_order.ltex(value as u32 - 1) {
-            Some(ltex) => ltex.texture.decode(),
-            None => {
-                warn_once(warned, format!("no LTEX record with index {}", value - 1));
-                return white_stand_in(images, missing_layer);
-            }
-        }
-    };
-    match vfs.0.resolve_texture(&name) {
-        Some(path) => asset_server
-            .load_builder()
-            .with_settings(|s: &mut ImageLoaderSettings| {
-                s.is_srgb = true;
-                let mut sampler = ImageSamplerDescriptor::default();
-                sampler.set_address_mode(ImageAddressMode::Repeat);
-                s.sampler = ImageSampler::Descriptor(sampler);
-            })
-            .load(format!("tes://{path}")),
-        None => {
-            warn_once(
-                warned,
-                format!("land texture {name:?} not found in the VFS"),
-            );
-            white_stand_in(images, missing_layer)
-        }
-    }
-}
-
-/// The shared 1×1 white stand-in bound in place of unresolvable land textures
-/// ([`Image::default`] is a 1×1 all-white texture).
-fn white_stand_in(
-    images: &mut Assets<Image>,
-    missing_layer: &mut Option<Handle<Image>>,
-) -> Handle<Image> {
-    missing_layer
-        .get_or_insert_with(|| images.add(Image::default()))
-        .clone()
-}
-
-fn warn_once(warned: &mut HashSet<String>, message: String) {
-    if warned.insert(message.clone()) {
-        eprintln!("bevy-tes: {message}");
-    }
-}
-
-/// Spawn the stand-in water plane for a cell:
-///
-/// - **Interior** with water: a large translucent sheet at the authored water height,
-///   centred on the spawned references (interior coordinates aren't origin-centred).
-/// - **Exterior**: sea level is the implicit global height 0 — one cell-sized plane,
-///   spawned only when the cell has terrain that dips below it (inland cells skip the
-///   hidden plane; neighbouring cells' planes tile seamlessly).
-fn spawn_water(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    seed_entity: Entity,
-    cell: &Cell,
-    center: Vec3,
-    terrain_min_height: Option<f32>,
-) {
-    let interior = cell.data.flags.contains(CellFlags::INTERIOR);
-    let (center, half_size) = if interior {
-        let has_water =
-            cell.data.flags.contains(CellFlags::HAS_WATER) || cell.water_height.is_some();
-        if !has_water {
-            return;
-        }
-        let height = cell.water_height.unwrap_or(0.0) * convert::METERS_PER_UNIT;
-        (
-            Vec3::new(center.x, height, center.z),
-            convert::CELL_SIZE_METERS,
-        )
-    } else {
-        if !terrain_min_height.is_some_and(|min| min < 0.0) {
-            return;
-        }
-        let half = convert::CELL_SIZE_METERS / 2.0;
-        let corner = convert::land_transform(cell.data.grid_x, cell.data.grid_y).translation;
-        (corner + Vec3::new(half, 0.0, -half), half)
-    };
-    commands.spawn((
-        Mesh3d(meshes.add(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(half_size))))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgba(0.1, 0.3, 0.5, 0.6),
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..Default::default()
-        })),
-        Transform::from_translation(center),
-        Visibility::default(),
-        Name::new("Water"),
-        CellWater,
-        ChildOf(seed_entity),
-    ));
 }
