@@ -106,7 +106,8 @@ pub mod terrain;
 
 #[cfg(feature = "scene")]
 pub use cell::{
-    CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain, CellWater,
+    CellBuildTask, CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned,
+    CellTerrain, CellWater,
 };
 #[cfg(feature = "scene")]
 pub use convert::{CELL_SIZE_METERS, METERS_PER_UNIT};
@@ -446,7 +447,7 @@ impl Plugin for TesPlugin {
             init_asset_if_missing::<bevy::mesh::Mesh>(app);
             init_asset_if_missing::<bevy::pbr::StandardMaterial>(app);
             init_asset_if_missing::<bevy::world_serialization::WorldAsset>(app);
-            // Chained so a cell paged in by a streamer resolves the same frame.
+            // Chained so a cell paged in by a streamer starts its build the same frame.
             use bevy::ecs::schedule::IntoScheduleConfigs;
             app.add_systems(
                 bevy::app::Update,
