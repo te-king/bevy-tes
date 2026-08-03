@@ -17,8 +17,10 @@
 //!
 //! The work splits in two: the `cell_build` module turns the cell record into an owned,
 //! ECS-free plan (all the CPU work — reference resolution, terrain mesh building,
-//! texture path resolution), and this module applies the plan — spawning entities and
-//! starting the asset loads it names.
+//! texture path resolution) **on the async compute task pool**, and this module applies
+//! the finished plan on the main thread — spawning entities and starting the asset
+//! loads it names. A seed therefore resolves a frame or two after it appears rather
+//! than in the same frame it was seen.
 //!
 //! Exterior cells also grow a terrain child tagged [`CellTerrain`] — a mesh built from
 //! the cell's `LAND` record (65×65 vertex heights, normals and colors) — plus a sea-level
@@ -57,6 +59,7 @@ use bevy::math::primitives::Plane3d;
 use bevy::mesh::{Mesh, Mesh3d};
 use bevy::pbr::{MeshMaterial3d, StandardMaterial};
 use bevy::render::renderer::RenderDevice;
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::transform::components::Transform;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 
@@ -127,13 +130,29 @@ pub struct CellEnvironment {
     pub water_height: Option<f32>,
 }
 
-/// Seeds that still need spawning: not yet done, not yet failed.
-type PendingSeeds<'w, 's> =
-    Query<'w, 's, (Entity, &'static CellSeed), (Without<CellSpawned>, Without<CellSpawnFailed>)>;
+/// Seeds that still need spawning: not yet done, not yet failed, not yet building.
+type PendingSeeds<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static CellSeed),
+    (
+        Without<CellSpawned>,
+        Without<CellSpawnFailed>,
+        Without<CellBuildTask>,
+    ),
+>;
+
+/// A seed's in-flight background build: present between the build being kicked and its
+/// plan being applied ([`CellSpawned`]/[`CellSpawnFailed`] arriving). Dropping it (e.g.
+/// when a streamer pages the seed out mid-build) cancels the task.
+#[derive(Component)]
+pub struct CellBuildTask(Task<Result<CellPlan, String>>);
 
 /// Resolves pending [`CellSeed`]s and spawns their cells. Registered by `TesPlugin`
-/// under the `scene` feature; polls until each seed's load order loads, then builds the
-/// cell's plan (`cell_build`) and applies it once.
+/// under the `scene` feature. Two stages per frame: seeds whose load order has loaded
+/// kick a [`build_cell`](cell_build) task on the [`AsyncComputeTaskPool`] (the CPU work
+/// happens off the main thread), and seeds whose task has finished get their plan
+/// applied — entities spawned, asset loads started — in one frame.
 ///
 /// Terrain is texture-splatted when `Assets<TerrainSplatMaterial>` exists (i.e.
 /// [`TerrainPlugin`](crate::TerrainPlugin) — or a test harness — registered it) and the
@@ -143,6 +162,7 @@ type PendingSeeds<'w, 's> =
 pub fn spawn_cells(
     mut commands: Commands,
     seeds: PendingSeeds,
+    mut building: Query<(Entity, &CellSeed, &mut CellBuildTask)>,
     load_orders: Res<Assets<LoadOrderAsset>>,
     asset_server: Res<AssetServer>,
     vfs: Res<TesVfsHandle>,
@@ -155,11 +175,8 @@ pub fn spawn_cells(
     mut terrain_material: Local<Option<Handle<StandardMaterial>>>,
     mut missing_layer: Local<Option<Handle<Image>>>,
 ) {
-    // Headless apps have no render device — proceed (nothing renders, tests assert on
-    // the material); a device without binding arrays falls back to the white material.
-    let splat_supported = render_device
-        .as_deref()
-        .is_none_or(terrain::splat_supported);
+    // Kick builds: each ready seed moves the CPU work onto the compute pool, holding
+    // its own Arcs so the task outlives this frame's borrows.
     for (seed_entity, seed) in &seeds {
         let Some(load_order) = load_orders.get(&seed.load_order) else {
             if let bevy::asset::LoadState::Failed(e) = asset_server.load_state(&seed.load_order) {
@@ -173,7 +190,28 @@ pub fn spawn_cells(
             }
             continue; // still loading; try again next frame
         };
-        let plan = match build_cell(load_order.load_order(), &vfs.0, &seed.cell) {
+        let load_order = load_order.shared();
+        let vfs = vfs.0.clone();
+        let cell = seed.cell.clone();
+        let task =
+            AsyncComputeTaskPool::get().spawn(async move { build_cell(&load_order, &vfs, &cell) });
+        commands.entity(seed_entity).insert(CellBuildTask(task));
+    }
+
+    // Apply finished builds (a task kicked above isn't visible here until its insert
+    // command applies, so a build is polled from the frame after it starts).
+    //
+    // Headless apps have no render device — proceed (nothing renders, tests assert on
+    // the material); a device without binding arrays falls back to the white material.
+    let splat_supported = render_device
+        .as_deref()
+        .is_none_or(terrain::splat_supported);
+    for (seed_entity, seed, mut task) in &mut building {
+        let Some(result) = block_on(poll_once(&mut task.0)) else {
+            continue; // still building; poll again next frame
+        };
+        commands.entity(seed_entity).remove::<CellBuildTask>();
+        let plan = match result {
             Ok(plan) => plan,
             Err(reason) => {
                 eprintln!("bevy-tes: {reason} (for {:?})", seed.cell);

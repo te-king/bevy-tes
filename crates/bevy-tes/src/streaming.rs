@@ -4,7 +4,8 @@
 //! anchor's position to the exterior grid and diffs the wanted neighborhood against the
 //! cells currently live: cells whose center falls within [`CellStreamer::radius`] are
 //! spawned as ordinary [`CellSeed`]s (nearest first, at most [`CellStreamer::budget`]
-//! per frame — a seed spawns its whole cell in one frame), and live cells whose center
+//! per frame — each seed's cell builds in the background and applies whole a frame or
+//! two later), and live cells whose center
 //! drifts beyond `radius + hysteresis` are despawned with their entire subtree. The
 //! hysteresis ring keeps boundary cells from thrashing as the anchor wanders, and
 //! doubles as an unload delay: a despawned cell's asset handles drop with its entities,
@@ -50,8 +51,9 @@ pub struct CellStreamer {
     pub radius: f32,
     /// Extra meters beyond `radius` a live cell may drift before paging out.
     pub hysteresis: f32,
-    /// Maximum cells paged in per frame (each seed spawns its whole cell — a few
-    /// hundred entities — in a single frame).
+    /// Maximum cells paged in per frame. A paged-in seed starts a background build;
+    /// the finished cell — a few hundred entities — still applies in a single frame,
+    /// so this bounds how many such applies can land together.
     pub budget: usize,
     /// The live seeds, by grid coordinate.
     live: HashMap<(i32, i32), Entity>,
@@ -83,8 +85,8 @@ fn cell_center(gx: i32, gy: i32) -> Vec2 {
 
 /// Diffs each [`CellStreamer`]'s neighborhood against its live cells, spawning and
 /// despawning [`CellSeed`]s. Registered by `TesPlugin` (chained before
-/// [`spawn_cells`](crate::cell::spawn_cells), so a paged-in seed resolves the same
-/// frame). Waits until the streamer's load order is loaded.
+/// [`spawn_cells`](crate::cell::spawn_cells), so a paged-in seed starts its background
+/// build the same frame). Waits until the streamer's load order is loaded.
 pub fn page_cells(
     mut commands: Commands,
     mut streamers: Query<(&GlobalTransform, &mut CellStreamer)>,
