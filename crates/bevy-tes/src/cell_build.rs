@@ -47,7 +47,7 @@ pub(crate) struct CellPlan {
     pub warnings: Vec<Warning>,
 }
 
-/// One placed object: the child entity's components plus the model to load, if any.
+/// One placed object: the reference entity's components plus the model to load, if any.
 pub(crate) struct ReferencePlan {
     /// The reference's `FRMR` id.
     pub id: u32,

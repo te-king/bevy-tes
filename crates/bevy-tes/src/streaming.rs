@@ -5,11 +5,17 @@
 //! cells currently live: cells whose center falls within [`CellStreamer::radius`] are
 //! spawned as ordinary [`CellSeed`]s (nearest first, at most [`CellStreamer::budget`]
 //! per frame — each seed's cell builds in the background and applies whole a frame or
-//! two later), and live cells whose center
-//! drifts beyond `radius + hysteresis` are despawned with their entire subtree. The
-//! hysteresis ring keeps boundary cells from thrashing as the anchor wanders, and
-//! doubles as an unload delay: a despawned cell's asset handles drop with its entities,
-//! so its meshes and textures stay cached only while something else still holds them.
+//! two later), and live cells whose center drifts beyond `radius + hysteresis` are
+//! despawned with their entire contents. The hysteresis ring keeps boundary cells from
+//! thrashing as the anchor wanders, and doubles as an unload delay: a despawned cell's
+//! asset handles drop with its entities, so its meshes and textures stay cached only
+//! while something else still holds them.
+//!
+//! Each seed is tied to its streamer by the [`StreamedBy`] relationship; the inverse
+//! [`StreamedCells`] on the anchor is the live set. The ECS maintains the pair: a seed
+//! despawned by anything else simply leaves [`StreamedCells`] (and is re-seeded next
+//! frame while still in range), and despawning the streamer entity despawns its live
+//! cells with it.
 //!
 //! ```ignore
 //! commands.spawn((
@@ -21,16 +27,15 @@
 //!
 //! Exterior-only: grid squares with no `CELL` record (past the map edge, or holes) are
 //! simply never seeded — absence is normal, not an error. Interiors are a door-transition
-//! problem for later. One streamer is expected at a time; despawning the streamer strands
-//! its live cells (they are top-level entities, not children of the anchor).
+//! problem for later. One streamer is expected at a time: streamers ignore each other's
+//! seeds, so overlapping neighborhoods would spawn a cell once per streamer.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use bevy::asset::{Assets, Handle};
 use bevy::ecs::component::Component;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::name::Name;
-use bevy::ecs::query::With;
 use bevy::ecs::system::{Commands, Query, Res};
 use bevy::math::Vec2;
 use bevy::transform::components::GlobalTransform;
@@ -41,9 +46,10 @@ use crate::convert::CELL_SIZE_METERS;
 use crate::tes_loadorder::CellId;
 
 /// Streams exterior cells around this entity: cells within `radius` of the anchor page
-/// in as [`CellSeed`]s, live cells beyond `radius + hysteresis` page out. See the
+/// in as [`CellSeed`]s, live cells beyond `radius + hysteresis` page out. The live set
+/// is the [`StreamedCells`] relationship target on the same entity. See the
 /// [module docs](self).
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone)]
 pub struct CellStreamer {
     /// The load order to stream cells from.
     pub load_order: Handle<LoadOrderAsset>,
@@ -55,8 +61,6 @@ pub struct CellStreamer {
     /// the finished cell — a few hundred entities — still applies in a single frame,
     /// so this bounds how many such applies can land together.
     pub budget: usize,
-    /// The live seeds, by grid coordinate.
-    live: HashMap<(i32, i32), Entity>,
 }
 
 impl CellStreamer {
@@ -68,8 +72,35 @@ impl CellStreamer {
             radius: 2.5 * CELL_SIZE_METERS,
             hysteresis: 0.5 * CELL_SIZE_METERS,
             budget: 2,
-            live: HashMap::new(),
         }
+    }
+}
+
+/// Relationship on a streamed [`CellSeed`]: the [`CellStreamer`] entity that paged it
+/// in. Inserted by [`page_cells`]; the inverse is [`StreamedCells`] on the streamer.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+#[relationship(relationship_target = StreamedCells)]
+pub struct StreamedBy(#[entities] pub Entity);
+
+impl StreamedBy {
+    /// The streamer entity that paged this seed in.
+    pub fn streamer(&self) -> Entity {
+        self.0
+    }
+}
+
+/// The live seeds of a [`CellStreamer`], maintained by the ECS from the [`StreamedBy`]
+/// relationship on each seed. `linked_spawn`: despawning the streamer despawns its live
+/// cells with it. Derefs to `[Entity]`, like [`Children`](bevy::ecs::hierarchy::Children).
+#[derive(Component, Default, Debug)]
+#[relationship_target(relationship = StreamedBy, linked_spawn)]
+pub struct StreamedCells(Vec<Entity>);
+
+impl std::ops::Deref for StreamedCells {
+    type Target = [Entity];
+
+    fn deref(&self) -> &[Entity] {
+        &self.0
     }
 }
 
@@ -89,30 +120,39 @@ fn cell_center(gx: i32, gy: i32) -> Vec2 {
 /// build the same frame). Waits until the streamer's load order is loaded.
 pub fn page_cells(
     mut commands: Commands,
-    mut streamers: Query<(&GlobalTransform, &mut CellStreamer)>,
+    streamers: Query<(
+        Entity,
+        &GlobalTransform,
+        &CellStreamer,
+        Option<&StreamedCells>,
+    )>,
+    seeds: Query<&CellSeed>,
     load_orders: Res<Assets<LoadOrderAsset>>,
-    seeds: Query<(), With<CellSeed>>,
 ) {
-    for (anchor, mut streamer) in &mut streamers {
+    for (streamer_entity, anchor, streamer, live) in &streamers {
         let Some(load_order) = load_orders.get(&streamer.load_order) else {
             continue; // still loading; try again next frame
         };
         let translation = anchor.translation();
         let anchor_xy = Vec2::new(translation.x, -translation.z);
 
-        // Page out first: live cells beyond the hysteresis ring, and entries whose
-        // entity something else already despawned.
+        // Page out first: live cells beyond the hysteresis ring. Seeds something else
+        // despawned have already left `StreamedCells`, so there is nothing to prune.
         let drop_beyond = streamer.radius + streamer.hysteresis;
-        streamer.live.retain(|&(gx, gy), &mut entity| {
-            if !seeds.contains(entity) {
-                return false;
-            }
+        let mut live_grids = HashSet::new();
+        for &entity in live.map(|cells| &cells[..]).unwrap_or_default() {
+            let Ok(seed) = seeds.get(entity) else {
+                continue;
+            };
+            let CellId::Exterior { x: gx, y: gy } = seed.cell else {
+                continue; // page_cells only seeds exteriors
+            };
             if anchor_xy.distance(cell_center(gx, gy)) <= drop_beyond {
-                return true;
+                live_grids.insert((gx, gy));
+            } else {
+                commands.entity(entity).despawn();
             }
-            commands.entity(entity).despawn();
-            false
-        });
+        }
 
         // Page in: authored cells within the radius, nearest first, through the budget.
         // Absent grids (map edge) probe as None and are simply skipped — re-probing
@@ -125,7 +165,7 @@ pub fn page_cells(
         let mut wanted = Vec::new();
         for gx in min_gx..=max_gx {
             for gy in min_gy..=max_gy {
-                if streamer.live.contains_key(&(gx, gy)) {
+                if live_grids.contains(&(gx, gy)) {
                     continue;
                 }
                 let distance_sq = anchor_xy.distance_squared(cell_center(gx, gy));
@@ -138,16 +178,14 @@ pub fn page_cells(
         }
         wanted.sort_by(|a, b| a.1.total_cmp(&b.1));
         for &((gx, gy), _) in wanted.iter().take(streamer.budget) {
-            let entity = commands
-                .spawn((
-                    CellSeed {
-                        load_order: streamer.load_order.clone(),
-                        cell: CellId::exterior(gx, gy),
-                    },
-                    Name::new(format!("Cell {gx},{gy}")),
-                ))
-                .id();
-            streamer.live.insert((gx, gy), entity);
+            commands.spawn((
+                CellSeed {
+                    load_order: streamer.load_order.clone(),
+                    cell: CellId::exterior(gx, gy),
+                },
+                StreamedBy(streamer_entity),
+                Name::new(format!("Cell {gx},{gy}")),
+            ));
         }
     }
 }
