@@ -1,5 +1,5 @@
 //! End-to-end tests of cell spawning (`scene` feature): a `CellSeed` entity becomes one
-//! child per supported object reference.
+//! `InCell`-related entity per supported object reference.
 //!
 //! The synthetic test builds its plugin in memory and always runs; the game-data tests
 //! skip themselves when the (gitignored) `data/` fixtures are absent.
@@ -8,7 +8,6 @@
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::asset::{AssetServer, Assets, Handle, LoadState};
-use bevy::ecs::hierarchy::ChildOf;
 use bevy::light::PointLight;
 use bevy::math::{Quat, Vec3};
 use bevy::mesh::{Mesh, Mesh3d};
@@ -25,7 +24,7 @@ use tes3_esm::{Esm, EsmDirectory, L1Str, Record};
 
 use bevy_tes::{
     CELL_SIZE_METERS, CellId, CellReference, CellSeed, CellSpawnFailed, CellSpawned, CellTerrain,
-    CellWater, LoadOrderAsset, METERS_PER_UNIT, TerrainSplatMaterial,
+    CellWater, InCell, LoadOrderAsset, METERS_PER_UNIT, TerrainSplatMaterial,
 };
 
 mod common;
@@ -175,11 +174,9 @@ fn synthetic_cell_spawns_and_skips() {
     assert_eq!(light.range, 256.0 * METERS_PER_UNIT);
 
     // Interior water: one stand-in plane at the water height.
-    let mut water = app
-        .world_mut()
-        .query::<(&CellWater, &Transform, &ChildOf)>();
-    let (_, water_transform, parent) = water.iter(app.world()).next().expect("water plane");
-    assert_eq!(parent.parent(), seed);
+    let mut water = app.world_mut().query::<(&CellWater, &Transform, &InCell)>();
+    let (_, water_transform, in_cell) = water.iter(app.world()).next().expect("water plane");
+    assert_eq!(in_cell.seed(), seed);
     assert_eq!(water_transform.translation.y, 50.0 * METERS_PER_UNIT);
 }
 
@@ -349,9 +346,9 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
     // The terrain child sits at the cell's south-west corner with the full vertex grid.
     let mut terrain = app
         .world_mut()
-        .query::<(&CellTerrain, &Transform, &Mesh3d, &ChildOf)>();
-    let (_, transform, mesh, parent) = terrain.iter(app.world()).next().expect("terrain child");
-    assert_eq!(parent.parent(), seed);
+        .query::<(&CellTerrain, &Transform, &Mesh3d, &InCell)>();
+    let (_, transform, mesh, in_cell) = terrain.iter(app.world()).next().expect("terrain child");
+    assert_eq!(in_cell.seed(), seed);
     assert_eq!(
         transform.translation,
         Vec3::new(CELL_SIZE_METERS, 0.0, -2.0 * CELL_SIZE_METERS)
@@ -369,11 +366,9 @@ fn synthetic_exterior_spawns_terrain_and_sea() {
     assert_eq!(positions[0][1], -10.0 * HEIGHT_SCALE * METERS_PER_UNIT);
 
     // Sunken terrain gets a sea-level plane at the cell's centre.
-    let mut water = app
-        .world_mut()
-        .query::<(&CellWater, &Transform, &ChildOf)>();
-    let (_, water_transform, parent) = water.iter(app.world()).next().expect("sea-level water");
-    assert_eq!(parent.parent(), seed);
+    let mut water = app.world_mut().query::<(&CellWater, &Transform, &InCell)>();
+    let (_, water_transform, in_cell) = water.iter(app.world()).next().expect("sea-level water");
+    assert_eq!(in_cell.seed(), seed);
     assert_eq!(
         water_transform.translation,
         Vec3::new(
@@ -487,10 +482,10 @@ fn interior_cell_spawns_references() {
     };
 
     // Every reference child carries its provenance; count matches the report.
-    let mut refs = app.world_mut().query::<(&CellReference, &ChildOf)>();
+    let mut refs = app.world_mut().query::<(&CellReference, &InCell)>();
     let children = refs
         .iter(app.world())
-        .filter(|(_, p)| p.parent() == seed)
+        .filter(|(_, c)| c.seed() == seed)
         .count();
     assert_eq!(children, spawned_count);
 
@@ -605,10 +600,10 @@ fn exterior_cell_spawns_references() {
     assert!(spawned.spawned > 0, "{spawned:?}");
 
     // Exactly one terrain child, whose first vertex height matches the raw VHGT fields.
-    let mut terrain = app.world_mut().query::<(&CellTerrain, &Mesh3d, &ChildOf)>();
+    let mut terrain = app.world_mut().query::<(&CellTerrain, &Mesh3d, &InCell)>();
     let handles: Vec<_> = terrain
         .iter(app.world())
-        .filter(|(_, _, p)| p.parent() == seed)
+        .filter(|(_, _, c)| c.seed() == seed)
         .map(|(_, mesh, _)| mesh.0.clone())
         .collect();
     assert_eq!(handles.len(), 1, "one terrain child per exterior cell");

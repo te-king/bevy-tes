@@ -46,8 +46,8 @@
 //! resource ([`read_load_order`] fills the list from a plain-text file).
 //!
 //! Whole **cells** (interiors or exterior grid squares) spawn the same way from a loaded
-//! load order — one child entity per placed object, each loading its own NIF scene (see
-//! [`cell`]). Everything spawns Y-up and **in meters** — game-frame axes and game units
+//! load order — one entity per placed object, tied to the seed by the [`InCell`]
+//! relationship and each loading its own NIF scene (see [`cell`]). Everything spawns Y-up and **in meters** — game-frame axes and game units
 //! convert exactly once, at the [`convert`] boundary (see
 //! [`METERS_PER_UNIT`](convert::METERS_PER_UNIT)):
 //!
@@ -106,13 +106,13 @@ pub mod terrain;
 
 #[cfg(feature = "scene")]
 pub use cell::{
-    CellBuildTask, CellEnvironment, CellReference, CellSeed, CellSpawnFailed, CellSpawned,
-    CellTerrain, CellWater,
+    CellBuildTask, CellContents, CellEnvironment, CellReference, CellSeed, CellSpawnFailed,
+    CellSpawned, CellTerrain, CellWater, InCell,
 };
 #[cfg(feature = "scene")]
 pub use convert::{CELL_SIZE_METERS, METERS_PER_UNIT};
 #[cfg(feature = "scene")]
-pub use streaming::CellStreamer;
+pub use streaming::{CellStreamer, StreamedBy, StreamedCells};
 #[cfg(feature = "scene")]
 pub use terrain::{TerrainPlugin, TerrainSplatMaterial};
 pub use tes_loadorder::{CellId, ObjectKind, ObjectRef, TesLoadOrder};

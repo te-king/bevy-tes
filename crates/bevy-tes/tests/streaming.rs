@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use bevy::app::App;
 use bevy::asset::{AssetServer, Assets, Handle};
+use bevy::ecs::entity::Entity;
 use bevy::math::Vec2;
 use bevy::transform::components::GlobalTransform;
 use tes3_esm::records::cell::{Cell, CellData, CellFlags, Reference};
@@ -195,9 +196,79 @@ fn moving_pages_out_beyond_hysteresis() {
     });
 
     assert_eq!(live_grids(&mut app), moved);
-    // The paged-out cell's subtree went with it: one placed static per live cell.
+    // The paged-out cell's contents went with it: one placed static per live cell.
     let mut references = app.world_mut().query::<&CellReference>();
     assert_eq!(references.iter(app.world()).count(), moved.len());
+}
+
+#[test]
+fn despawning_the_streamer_despawns_its_cells() {
+    let mut app = app_with_assets();
+    let handle = app
+        .world_mut()
+        .resource_mut::<Assets<LoadOrderAsset>>()
+        .add(synthetic_grid_asset(&block_minus_corner()));
+
+    let mut streamer = CellStreamer::new(handle);
+    streamer.radius = 2.0 * CELL_SIZE_METERS;
+    streamer.budget = 16;
+    let anchor = app.world_mut().spawn((over_cell(1, 1), streamer)).id();
+
+    let expected: BTreeSet<(i32, i32)> = block_minus_corner().into_iter().collect();
+    pump_until(&mut app, |app| {
+        live_grids(app) == expected && all_resolved(app)
+    });
+    assert_eq!(live_grids(&mut app), expected);
+
+    // `StreamedCells` is a `linked_spawn` target: the seeds go down with the streamer,
+    // and each seed's `CellContents` takes its references with it.
+    app.world_mut().entity_mut(anchor).despawn();
+    app.update();
+    assert!(
+        live_grids(&mut app).is_empty(),
+        "seeds outlived the streamer"
+    );
+    let mut references = app.world_mut().query::<&CellReference>();
+    assert_eq!(
+        references.iter(app.world()).count(),
+        0,
+        "cell contents outlived the streamer"
+    );
+}
+
+#[test]
+fn externally_despawned_seed_is_reseeded() {
+    let mut app = app_with_assets();
+    let handle = app
+        .world_mut()
+        .resource_mut::<Assets<LoadOrderAsset>>()
+        .add(synthetic_grid_asset(&block_minus_corner()));
+
+    let mut streamer = CellStreamer::new(handle);
+    streamer.radius = 2.0 * CELL_SIZE_METERS;
+    streamer.budget = 16;
+    app.world_mut().spawn((over_cell(1, 1), streamer));
+
+    let expected: BTreeSet<(i32, i32)> = block_minus_corner().into_iter().collect();
+    pump_until(&mut app, |app| {
+        live_grids(app) == expected && all_resolved(app)
+    });
+
+    // Despawn one seed out from under the streamer. Relationship bookkeeping drops it
+    // from `StreamedCells`, so the streamer sees the hole and re-seeds it while the
+    // grid stays in range.
+    let mut seeds = app.world_mut().query::<(Entity, &CellSeed)>();
+    let (victim, _) = seeds
+        .iter(app.world())
+        .find(|(_, seed)| seed.cell == CellId::exterior(1, 1))
+        .expect("the anchor cell is live");
+    app.world_mut().entity_mut(victim).despawn();
+    assert!(!live_grids(&mut app).contains(&(1, 1)));
+
+    pump_until(&mut app, |app| {
+        live_grids(app) == expected && all_resolved(app)
+    });
+    assert_eq!(live_grids(&mut app), expected, "the hole was re-seeded");
 }
 
 /// The authored exterior cells whose centers lie within `radius` meters of the center

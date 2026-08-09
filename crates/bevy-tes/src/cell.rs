@@ -1,12 +1,18 @@
 //! Spawning cells (interiors and exterior grid squares) from a loaded load order.
 //!
 //! Spawn an entity with a [`CellSeed`] naming a cell; once the [`LoadOrderAsset`] is
-//! loaded, [`spawn_cells`] resolves the cell record and spawns one child entity per
-//! object reference — each with the reference's placement as a Y-up [`Transform`] in
+//! loaded, [`spawn_cells`] resolves the cell record and spawns one entity per object
+//! reference — each with the reference's placement as a Y-up [`Transform`] in
 //! meters (see [`convert::METERS_PER_UNIT`](crate::convert::METERS_PER_UNIT)) and,
 //! when its object's model resolves in the VFS, a [`WorldAssetRoot`] pointing at the
 //! NIF's `#Scene` sub-asset. Only the NIFs a spawned cell actually references get
 //! loaded.
+//!
+//! Everything spawned for a cell (references, terrain, water) is a world-space root
+//! entity tied to its seed by the [`InCell`] relationship — reference placements are
+//! absolute in the plugin data, so there is nothing for a transform hierarchy to
+//! propagate. The inverse [`CellContents`] on the seed lists the contents, and
+//! despawning the seed despawns them with it.
 //!
 //! ```ignore
 //! commands.spawn(CellSeed {
@@ -22,7 +28,7 @@
 //! loads it names. A seed therefore resolves a frame or two after it appears rather
 //! than in the same frame it was seen.
 //!
-//! Exterior cells also grow a terrain child tagged [`CellTerrain`] — a mesh built from
+//! Exterior cells also grow a terrain entity tagged [`CellTerrain`] — a mesh built from
 //! the cell's `LAND` record (65×65 vertex heights, normals and colors) — plus a sea-level
 //! water plane when the terrain dips below height 0. When
 //! [`TerrainPlugin`](crate::TerrainPlugin) is added, the terrain is texture-splatted
@@ -46,7 +52,6 @@ use bevy::camera::visibility::Visibility;
 use bevy::color::Color;
 use bevy::ecs::component::Component;
 use bevy::ecs::entity::Entity;
-use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::name::Name;
 use bevy::ecs::query::Without;
 use bevy::ecs::system::{Commands, Local, Query, Res, ResMut};
@@ -68,11 +73,11 @@ use crate::terrain::{self, TerrainSplatMaterial};
 use crate::tes_loadorder::CellId;
 use crate::{LoadOrderAsset, TesVfsHandle};
 
-/// Asks for a cell's contents to be spawned as children of this entity, once
+/// Asks for a cell's contents to be spawned, tied to this entity by [`InCell`], once
 /// `load_order` finishes loading. One-shot: the seed entity is tagged [`CellSpawned`]
-/// (or [`CellSpawnFailed`]) afterwards. See the [module docs](self).
+/// (or [`CellSpawnFailed`]) afterwards. The seed is a plain marker — contents spawn as
+/// world-space roots, so it needs no transform of its own. See the [module docs](self).
 #[derive(Component, Debug, Clone)]
-#[require(Transform, Visibility)]
 pub struct CellSeed {
     /// The load order to read the cell from.
     pub load_order: bevy::asset::Handle<LoadOrderAsset>,
@@ -80,10 +85,41 @@ pub struct CellSeed {
     pub cell: CellId,
 }
 
-/// Inserted on the seed entity once its children have been spawned.
+/// Relationship on every entity spawned for a cell (references, terrain, water): the
+/// seed entity of the cell it belongs to. Contents are world-space root entities, not
+/// [`ChildOf`](bevy::ecs::hierarchy::ChildOf) children — cell placements are absolute
+/// in the plugin data — so this carries membership without a transform hierarchy.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+#[relationship(relationship_target = CellContents)]
+pub struct InCell(#[entities] pub Entity);
+
+impl InCell {
+    /// The seed entity of the cell this entity belongs to.
+    pub fn seed(&self) -> Entity {
+        self.0
+    }
+}
+
+/// Everything spawned for this seed's cell, maintained by the ECS from the [`InCell`]
+/// relationship on each content entity. `linked_spawn`: despawning the seed despawns
+/// its contents with it (how a streamer pages a whole cell out). Derefs to `[Entity]`,
+/// like [`Children`](bevy::ecs::hierarchy::Children).
+#[derive(Component, Default, Debug)]
+#[relationship_target(relationship = InCell, linked_spawn)]
+pub struct CellContents(Vec<Entity>);
+
+impl std::ops::Deref for CellContents {
+    type Target = [Entity];
+
+    fn deref(&self) -> &[Entity] {
+        &self.0
+    }
+}
+
+/// Inserted on the seed entity once its cell's contents have been spawned.
 #[derive(Component, Debug)]
 pub struct CellSpawned {
-    /// Reference children spawned (including model-less stand-ins).
+    /// Reference entities spawned (including model-less stand-ins).
     pub spawned: usize,
     /// References skipped (NPCs/creatures, leveled lists, disabled, unknown ids).
     pub skipped: usize,
@@ -94,7 +130,7 @@ pub struct CellSpawned {
 #[derive(Component, Debug)]
 pub struct CellSpawnFailed(pub String);
 
-/// On every spawned reference child: which cell reference it came from.
+/// On every spawned reference entity: which cell reference it came from.
 #[derive(Component, Debug, Clone)]
 pub struct CellReference {
     /// The reference's `FRMR` id.
@@ -109,7 +145,7 @@ pub struct CellReference {
 #[derive(Component, Debug)]
 pub struct CellWater;
 
-/// Marker on the terrain mesh child spawned for an exterior cell with `LAND` data.
+/// Marker on the terrain mesh entity spawned for an exterior cell with `LAND` data.
 #[derive(Component, Debug)]
 pub struct CellTerrain;
 
@@ -236,9 +272,10 @@ pub fn spawn_cells(
     }
 }
 
-/// Apply a built [`CellPlan`] under the seed entity: spawn the planned children and
-/// start the asset loads the plan's paths name. The main-thread half of cell spawning —
-/// everything here needs `Commands`, the `AssetServer` or an `Assets` collection.
+/// Apply a built [`CellPlan`] for the seed entity: spawn the planned contents (each
+/// tied to the seed with [`InCell`]) and start the asset loads the plan's paths name.
+/// The main-thread half of cell spawning — everything here needs `Commands`, the
+/// `AssetServer` or an `Assets` collection.
 #[allow(clippy::too_many_arguments)]
 fn apply_plan(
     commands: &mut Commands,
@@ -272,7 +309,7 @@ fn apply_plan(
 
     let (spawned, skipped) = (plan.references.len(), plan.skipped);
     for reference in plan.references {
-        let mut child = commands.spawn((
+        let mut entity = commands.spawn((
             reference.transform,
             Visibility::default(),
             Name::new(reference.object.clone()),
@@ -280,15 +317,15 @@ fn apply_plan(
                 id: reference.id,
                 object: reference.object,
             },
-            ChildOf(seed_entity),
+            InCell(seed_entity),
         ));
         if let Some(path) = reference.model_path {
-            child.insert(WorldAssetRoot(
+            entity.insert(WorldAssetRoot(
                 asset_server.load::<WorldAsset>(format!("tes://{path}#Scene")),
             ));
         }
         if let Some(light) = reference.light {
-            child.insert(light);
+            entity.insert(light);
         }
     }
 
@@ -299,7 +336,7 @@ fn apply_plan(
             Visibility::default(),
             Name::new(terrain_plan.name),
             CellTerrain,
-            ChildOf(seed_entity),
+            InCell(seed_entity),
         ));
         let splat = splat_materials.and_then(|splats| {
             let splat = terrain_plan.splat?;
@@ -343,7 +380,7 @@ fn apply_plan(
             Visibility::default(),
             Name::new("Water"),
             CellWater,
-            ChildOf(seed_entity),
+            InCell(seed_entity),
         ));
     }
 
