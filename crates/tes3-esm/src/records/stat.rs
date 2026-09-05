@@ -1,25 +1,14 @@
 //! `STAT` — a static object.
 
-use crate::common::{Subrecord, l1};
+use crate::common::l1;
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Stat<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
     /// NIF model file name.
+    #[tes(tag = b"MODL", decode = l1)]
     pub model: &'a L1Str,
-}
-
-impl<'a> Stat<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Stat<'a> {
-        let mut out = Stat::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"MODL" => out.model = l1(sub.data),
-                _ => {}
-            }
-        }
-        out
-    }
 }

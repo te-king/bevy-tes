@@ -17,6 +17,19 @@ pub use nom::number::complete::{le_f32, le_i8, le_i16, le_i32, le_u8, le_u16, le
 pub use tes_core::bytes::{finish, fixed_l1str, l1, parse_or_default};
 pub use tes_core::math::{Color, color};
 
+/// Parse a fixed-size array without allocating; its length is inferred from the field.
+pub(crate) fn array<'a, T: Default + Copy, const N: usize>(
+    mut parser: impl FnMut(&'a [u8]) -> IResult<&'a [u8], T>,
+) -> impl FnMut(&'a [u8]) -> IResult<&'a [u8], [T; N]> {
+    move |mut input| {
+        let mut values = [T::default(); N];
+        for value in &mut values {
+            (input, *value) = parser(input)?;
+        }
+        Ok((input, values))
+    }
+}
+
 /// A 4-byte record or subrecord tag, e.g. `TES3` or `NAME`.
 ///
 /// Wraps the raw bytes (`.0`, so subrecord loops can `match &sub.tag.0` against byte

@@ -1,35 +1,24 @@
 //! `PGRD` — a cell path grid.
 
-use crate::common::{
-    Subrecord, finish, flags, l1, le_i32, le_u8, le_u16, le_u32, parse_or_default,
-};
+use crate::common::{finish, flags, l1, le_i32, le_u8, le_u16, le_u32, parse_or_default};
+use nom::Parser;
 use nom::multi::many0;
-use nom::{IResult, Parser};
+use nom::sequence::terminated;
 use tes_core::L1Str;
+use tes3_esm_derive::{TesPayload, TesRecord};
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = path_grid_data)]
 pub struct PathGridData {
     /// Grid coordinates (exterior cells only).
+    #[tes(read = le_i32)]
     pub grid_x: i32,
+    #[tes(read = le_i32)]
     pub grid_y: i32,
+    #[tes(read = le_u16)]
     pub flags: u16,
+    #[tes(read = le_u16)]
     pub point_count: u16,
-}
-
-fn path_grid_data(input: &[u8]) -> IResult<&[u8], PathGridData> {
-    let (input, grid_x) = le_i32(input)?;
-    let (input, grid_y) = le_i32(input)?;
-    let (input, flags) = le_u16(input)?;
-    let (input, point_count) = le_u16(input)?;
-    Ok((
-        input,
-        PathGridData {
-            grid_x,
-            grid_y,
-            flags,
-            point_count,
-        },
-    ))
 }
 
 bitflags::bitflags! {
@@ -41,61 +30,32 @@ bitflags::bitflags! {
 }
 
 /// A single path grid node (16 bytes within `PGRP`).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = path_point)]
 pub struct PathPoint {
+    #[tes(read = le_i32)]
     pub x: i32,
+    #[tes(read = le_i32)]
     pub y: i32,
+    #[tes(read = le_i32)]
     pub z: i32,
+    #[tes(read = flags)]
     pub flags: PathPointFlags,
     /// Number of outgoing edges (entries in `PGRC` for this point).
+    #[tes(read = |input| terminated(le_u8, le_u16).parse(input))]
     pub connection_count: u8,
 }
 
-fn path_point(input: &[u8]) -> IResult<&[u8], PathPoint> {
-    let (input, x) = le_i32(input)?;
-    let (input, y) = le_i32(input)?;
-    let (input, z) = le_i32(input)?;
-    let (input, flags) = flags(input)?;
-    let (input, connection_count) = le_u8(input)?;
-    let (input, _unknown) = le_u16(input)?;
-    Ok((
-        input,
-        PathPoint {
-            x,
-            y,
-            z,
-            flags,
-            connection_count,
-        },
-    ))
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Pgrd<'a> {
+    #[tes(tag = b"DATA", decode = |bytes| parse_or_default(path_grid_data, bytes))]
     pub data: PathGridData,
     /// Cell name the path grid belongs to.
+    #[tes(tag = b"NAME", decode = l1)]
     pub cell: &'a L1Str,
+    #[tes(tag = b"PGRP", decode = |bytes| finish(many0(path_point).parse(bytes)).unwrap_or_default())]
     pub points: Vec<PathPoint>,
     /// Flattened edge list; index into `points`, grouped per point by connection count.
+    #[tes(tag = b"PGRC", decode = |bytes| finish(many0(le_u32).parse(bytes)).unwrap_or_default())]
     pub connections: Vec<u32>,
-}
-
-impl<'a> Pgrd<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Pgrd<'a> {
-        let mut out = Pgrd::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"DATA" => out.data = parse_or_default(path_grid_data, sub.data),
-                b"NAME" => out.cell = l1(sub.data),
-                b"PGRP" => {
-                    out.points = finish(many0(path_point).parse(sub.data)).unwrap_or_default()
-                }
-                b"PGRC" => {
-                    out.connections = finish(many0(le_u32).parse(sub.data)).unwrap_or_default()
-                }
-                _ => {}
-            }
-        }
-        out
-    }
 }

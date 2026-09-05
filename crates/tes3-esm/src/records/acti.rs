@@ -1,28 +1,17 @@
 //! `ACTI` — an activator.
 
-use crate::common::{Subrecord, l1};
+use crate::common::l1;
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Acti<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"MODL", decode = l1)]
     pub model: &'a L1Str,
+    #[tes(tag = b"FNAM", decode = |bytes| Some(l1(bytes)))]
     pub name: Option<&'a L1Str>,
+    #[tes(tag = b"SCRI", decode = |bytes| Some(l1(bytes)))]
     pub script: Option<&'a L1Str>,
-}
-
-impl<'a> Acti<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Acti<'a> {
-        let mut out = Acti::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"MODL" => out.model = l1(sub.data),
-                b"FNAM" => out.name = Some(l1(sub.data)),
-                b"SCRI" => out.script = Some(l1(sub.data)),
-                _ => {}
-            }
-        }
-        out
-    }
 }

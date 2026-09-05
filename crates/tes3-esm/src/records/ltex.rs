@@ -1,28 +1,17 @@
 //! `LTEX` — a landscape texture.
 
-use crate::common::{Subrecord, finish, l1, le_u32};
+use crate::common::{finish, l1, le_u32};
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Ltex<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
     /// Texture index (referenced by `VTEX` indices in LAND records).
+    #[tes(tag = b"INTV", decode = |bytes| finish(le_u32(bytes)).unwrap_or(0))]
     pub index: u32,
     /// Texture file name.
+    #[tes(tag = b"DATA", decode = l1)]
     pub texture: &'a L1Str,
-}
-
-impl<'a> Ltex<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ltex<'a> {
-        let mut out = Ltex::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"INTV" => out.index = finish(le_u32(sub.data)).unwrap_or(0),
-                b"DATA" => out.texture = l1(sub.data),
-                _ => {}
-            }
-        }
-        out
-    }
 }

@@ -1,8 +1,8 @@
 //! `LIGH` — a light.
 
-use crate::common::{Color, Subrecord, color, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{Color, color, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
 use tes_core::L1Str;
+use tes3_esm_derive::{TesPayload, TesRecord};
 
 bitflags::bitflags! {
     /// Light behavior flags (`LHDT`).
@@ -21,62 +21,37 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = light_data)]
 pub struct LightData {
+    #[tes(read = le_f32)]
     pub weight: f32,
+    #[tes(read = le_u32)]
     pub value: u32,
+    #[tes(read = le_i32)]
     pub time: i32,
+    #[tes(read = le_u32)]
     pub radius: u32,
+    #[tes(read = color)]
     pub color: Color,
+    #[tes(read = flags)]
     pub flags: LightFlags,
 }
 
-fn light_data(input: &[u8]) -> IResult<&[u8], LightData> {
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, time) = le_i32(input)?;
-    let (input, radius) = le_u32(input)?;
-    let (input, color) = color(input)?;
-    let (input, flags) = flags(input)?;
-    Ok((
-        input,
-        LightData {
-            weight,
-            value,
-            time,
-            radius,
-            color,
-            flags,
-        },
-    ))
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Ligh<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"MODL", decode = |bytes| Some(l1(bytes)))]
     pub model: Option<&'a L1Str>,
+    #[tes(tag = b"FNAM", decode = |bytes| Some(l1(bytes)))]
     pub name: Option<&'a L1Str>,
+    #[tes(tag = b"ITEX", decode = |bytes| Some(l1(bytes)))]
     pub icon: Option<&'a L1Str>,
+    #[tes(tag = b"LHDT", decode = |bytes| parse_or_default(light_data, bytes))]
     pub data: LightData,
+    #[tes(tag = b"SNAM", decode = |bytes| Some(l1(bytes)))]
     pub sound: Option<&'a L1Str>,
+    #[tes(tag = b"SCRI", decode = |bytes| Some(l1(bytes)))]
     pub script: Option<&'a L1Str>,
-}
-
-impl<'a> Ligh<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ligh<'a> {
-        let mut out = Ligh::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"MODL" => out.model = Some(l1(sub.data)),
-                b"FNAM" => out.name = Some(l1(sub.data)),
-                b"ITEX" => out.icon = Some(l1(sub.data)),
-                b"LHDT" => out.data = parse_or_default(light_data, sub.data),
-                b"SNAM" => out.sound = Some(l1(sub.data)),
-                b"SCRI" => out.script = Some(l1(sub.data)),
-                _ => {}
-            }
-        }
-        out
-    }
 }

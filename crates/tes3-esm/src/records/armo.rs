@@ -3,8 +3,8 @@
 use crate::common::{Subrecord, enumeration, l1, le_f32, le_u32, parse_or_default};
 use crate::macros::enum_field;
 use crate::shared::BipedItem;
-use nom::IResult;
 use tes_core::L1Str;
+use tes3_esm_derive::{TesPayload, TesRecord};
 
 enum_field! {
     /// Armor slot (`AODT`).
@@ -23,79 +23,64 @@ enum_field! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = armor_data)]
 pub struct ArmorData {
+    #[tes(read = enumeration)]
     pub kind: ArmorKind,
+    #[tes(read = le_f32)]
     pub weight: f32,
+    #[tes(read = le_u32)]
     pub value: u32,
+    #[tes(read = le_u32)]
     pub health: u32,
+    #[tes(read = le_u32)]
     pub enchant_points: u32,
+    #[tes(read = le_u32)]
     pub armor_rating: u32,
 }
 
-fn armor_data(input: &[u8]) -> IResult<&[u8], ArmorData> {
-    let (input, kind) = enumeration(input)?;
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, health) = le_u32(input)?;
-    let (input, enchant_points) = le_u32(input)?;
-    let (input, armor_rating) = le_u32(input)?;
-    Ok((
-        input,
-        ArmorData {
-            kind,
-            weight,
-            value,
-            health,
-            enchant_points,
-            armor_rating,
-        },
-    ))
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
+#[tes(unmapped = Self::biped_field)]
 pub struct Armo<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"MODL", decode = l1)]
     pub model: &'a L1Str,
+    #[tes(tag = b"FNAM", decode = l1)]
     pub name: &'a L1Str,
+    #[tes(tag = b"SCRI", decode = |bytes| Some(l1(bytes)))]
     pub script: Option<&'a L1Str>,
+    #[tes(tag = b"AODT", decode = |bytes| parse_or_default(armor_data, bytes))]
     pub data: ArmorData,
+    #[tes(tag = b"ITEX", decode = |bytes| Some(l1(bytes)))]
     pub icon: Option<&'a L1Str>,
     /// Biped slots (`INDX` with optional `BNAM`/`CNAM` model overrides).
+    #[tes(skip)]
     pub biped: Vec<BipedItem<'a>>,
+    #[tes(tag = b"ENAM", decode = |bytes| Some(l1(bytes)))]
     pub enchantment: Option<&'a L1Str>,
 }
 
 impl<'a> Armo<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Armo<'a> {
-        let mut out = Armo::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"MODL" => out.model = l1(sub.data),
-                b"FNAM" => out.name = l1(sub.data),
-                b"SCRI" => out.script = Some(l1(sub.data)),
-                b"AODT" => out.data = parse_or_default(armor_data, sub.data),
-                b"ITEX" => out.icon = Some(l1(sub.data)),
-                b"INDX" => out.biped.push(BipedItem {
-                    index: sub.data.first().copied().unwrap_or(0),
-                    male_model: None,
-                    female_model: None,
-                }),
-                b"BNAM" => {
-                    if let Some(last) = out.biped.last_mut() {
-                        last.male_model = Some(l1(sub.data));
-                    }
+    fn biped_field(&mut self, sub: Subrecord<'a>) {
+        match &sub.tag.0 {
+            b"INDX" => self.biped.push(BipedItem {
+                index: sub.data.first().copied().unwrap_or(0),
+                male_model: None,
+                female_model: None,
+            }),
+            b"BNAM" => {
+                if let Some(last) = self.biped.last_mut() {
+                    last.male_model = Some(l1(sub.data));
                 }
-                b"CNAM" => {
-                    if let Some(last) = out.biped.last_mut() {
-                        last.female_model = Some(l1(sub.data));
-                    }
-                }
-                b"ENAM" => out.enchantment = Some(l1(sub.data)),
-                _ => {}
             }
+            b"CNAM" => {
+                if let Some(last) = self.biped.last_mut() {
+                    last.female_model = Some(l1(sub.data));
+                }
+            }
+            _ => {}
         }
-        out
     }
 }

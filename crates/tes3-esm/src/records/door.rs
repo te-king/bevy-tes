@@ -1,34 +1,23 @@
 //! `DOOR` — a door.
 
-use crate::common::{Subrecord, l1};
+use crate::common::l1;
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Door<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"MODL", decode = l1)]
     pub model: &'a L1Str,
+    #[tes(tag = b"FNAM", decode = |bytes| Some(l1(bytes)))]
     pub name: Option<&'a L1Str>,
+    #[tes(tag = b"SCRI", decode = |bytes| Some(l1(bytes)))]
     pub script: Option<&'a L1Str>,
     /// Sound played when opening.
+    #[tes(tag = b"SNAM", decode = |bytes| Some(l1(bytes)))]
     pub open_sound: Option<&'a L1Str>,
     /// Sound played when closing.
+    #[tes(tag = b"ANAM", decode = |bytes| Some(l1(bytes)))]
     pub close_sound: Option<&'a L1Str>,
-}
-
-impl<'a> Door<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Door<'a> {
-        let mut out = Door::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"MODL" => out.model = l1(sub.data),
-                b"FNAM" => out.name = Some(l1(sub.data)),
-                b"SCRI" => out.script = Some(l1(sub.data)),
-                b"SNAM" => out.open_sound = Some(l1(sub.data)),
-                b"ANAM" => out.close_sound = Some(l1(sub.data)),
-                _ => {}
-            }
-        }
-        out
-    }
 }

@@ -1,13 +1,11 @@
 //! `NPC_` — a non-player character.
 
-use crate::common::{Subrecord, finish, fixed_l1str, flags, l1, le_u16, le_u32, parse_or_default};
-use crate::shared::{
-    AiData, AiPackage, InventoryItem, TravelDestination, ai_activate, ai_data, ai_escort,
-    ai_follow, ai_travel, ai_wander, inventory_item, travel_destination,
-};
+use crate::common::{Subrecord, array, finish, flags, l1, le_u16, le_u32, parse_or_default};
+use crate::shared::{AiData, AiPackage, InventoryItem, TravelDestination, actor_field, ai_data};
 use nom::IResult;
 use nom::number::complete::le_u8;
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
 /// NPC stats. The compact form is used when the auto-calc flag is set (12-byte `NPDT`);
 /// otherwise the full stat block is stored (52-byte `NPDT`).
@@ -67,19 +65,8 @@ fn npc_autocalc(input: &[u8]) -> IResult<&[u8], NpcStats> {
 
 fn npc_full(input: &[u8]) -> IResult<&[u8], NpcStats> {
     let (input, level) = le_u16(input)?;
-    let mut input = input;
-    let mut attributes = [0u8; 8];
-    for a in attributes.iter_mut() {
-        let (rest, v) = le_u8(input)?;
-        *a = v;
-        input = rest;
-    }
-    let mut skills = [0u8; 27];
-    for s in skills.iter_mut() {
-        let (rest, v) = le_u8(input)?;
-        *s = v;
-        input = rest;
-    }
+    let (input, attributes) = array(le_u8)(input)?;
+    let (input, skills) = array(le_u8)(input)?;
     let (input, _pad) = le_u8(input)?;
     let (input, health) = le_u16(input)?;
     let (input, spell_points) = le_u16(input)?;
@@ -120,92 +107,63 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
+#[tes(unmapped = Self::actor_field)]
 pub struct Npc<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"MODL", decode = |bytes| Some(l1(bytes)))]
     pub model: Option<&'a L1Str>,
+    #[tes(tag = b"FNAM", decode = |bytes| Some(l1(bytes)))]
     pub name: Option<&'a L1Str>,
+    #[tes(tag = b"RNAM", decode = l1)]
     pub race: &'a L1Str,
+    #[tes(tag = b"CNAM", decode = l1)]
     pub class: &'a L1Str,
+    #[tes(tag = b"ANAM", decode = |bytes| Some(l1(bytes)))]
     pub faction: Option<&'a L1Str>,
+    #[tes(tag = b"BNAM", decode = l1)]
     pub head_model: &'a L1Str,
+    #[tes(tag = b"KNAM", decode = |bytes| Some(l1(bytes)))]
     pub hair_model: Option<&'a L1Str>,
+    #[tes(tag = b"SCRI", decode = |bytes| Some(l1(bytes)))]
     pub script: Option<&'a L1Str>,
+    #[tes(skip)]
     pub stats: NpcStats,
+    #[tes(tag = b"FLAG", decode = |bytes| finish(flags(bytes)).unwrap_or_default())]
     pub flags: NpcFlags,
+    #[tes(skip)]
     pub inventory: Vec<InventoryItem<'a>>,
+    #[tes(skip)]
     pub spells: Vec<&'a L1Str>,
+    #[tes(tag = b"AIDT", decode = |bytes| Some(parse_or_default(ai_data, bytes)))]
     pub ai_data: Option<AiData>,
+    #[tes(skip)]
     pub destinations: Vec<TravelDestination<'a>>,
+    #[tes(skip)]
     pub ai_packages: Vec<AiPackage<'a>>,
 }
 
 impl<'a> Npc<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Npc<'a> {
-        let mut out = Npc::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"MODL" => out.model = Some(l1(sub.data)),
-                b"FNAM" => out.name = Some(l1(sub.data)),
-                b"RNAM" => out.race = l1(sub.data),
-                b"CNAM" => out.class = l1(sub.data),
-                b"ANAM" => out.faction = Some(l1(sub.data)),
-                b"BNAM" => out.head_model = l1(sub.data),
-                b"KNAM" => out.hair_model = Some(l1(sub.data)),
-                b"SCRI" => out.script = Some(l1(sub.data)),
-                b"NPDT" => {
-                    // Distinguish the 12-byte autocalc form from the 52-byte full form.
-                    let parsed = if sub.data.len() <= 12 {
-                        finish(npc_autocalc(sub.data))
-                    } else {
-                        finish(npc_full(sub.data))
-                    };
-                    if let Some(stats) = parsed {
-                        out.stats = stats;
-                    }
-                }
-                b"FLAG" => out.flags = finish(flags(sub.data)).unwrap_or_default(),
-                b"NPCO" => out
-                    .inventory
-                    .push(parse_or_default(inventory_item, sub.data)),
-                b"NPCS" => out
-                    .spells
-                    .push(finish(fixed_l1str(32)(sub.data)).unwrap_or_default()),
-                b"AIDT" => out.ai_data = Some(parse_or_default(ai_data, sub.data)),
-                b"DODT" => {
-                    if let Some(dest) = finish(travel_destination(sub.data)) {
-                        out.destinations.push(dest);
-                    }
-                }
-                b"DNAM" => {
-                    if let Some(last) = out.destinations.last_mut() {
-                        last.cell = Some(l1(sub.data));
-                    }
-                }
-                b"AI_A" => push_pkg(&mut out.ai_packages, finish(ai_activate(sub.data))),
-                b"AI_E" => push_pkg(&mut out.ai_packages, finish(ai_escort(sub.data))),
-                b"AI_F" => push_pkg(&mut out.ai_packages, finish(ai_follow(sub.data))),
-                b"AI_T" => push_pkg(&mut out.ai_packages, finish(ai_travel(sub.data))),
-                b"AI_W" => push_pkg(&mut out.ai_packages, finish(ai_wander(sub.data))),
-                b"CNDT" => attach_cell(&mut out.ai_packages, l1(sub.data)),
-                _ => {}
+    fn actor_field(&mut self, sub: Subrecord<'a>) {
+        if sub.tag == b"NPDT" {
+            // Distinguish the 12-byte autocalc form from the 52-byte full form.
+            let parsed = if sub.data.len() <= 12 {
+                finish(npc_autocalc(sub.data))
+            } else {
+                finish(npc_full(sub.data))
+            };
+            if let Some(stats) = parsed {
+                self.stats = stats;
             }
+        } else {
+            actor_field(
+                sub,
+                &mut self.inventory,
+                &mut self.spells,
+                &mut self.destinations,
+                &mut self.ai_packages,
+            );
         }
-        out
-    }
-}
-
-fn push_pkg<'a>(packages: &mut Vec<AiPackage<'a>>, pkg: Option<AiPackage<'a>>) {
-    if let Some(pkg) = pkg {
-        packages.push(pkg);
-    }
-}
-
-fn attach_cell<'a>(packages: &mut [AiPackage<'a>], cell: &'a L1Str) {
-    if let Some(AiPackage::Escort { cell: c, .. } | AiPackage::Follow { cell: c, .. }) =
-        packages.last_mut()
-    {
-        *c = Some(cell);
     }
 }

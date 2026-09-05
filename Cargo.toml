@@ -12,6 +12,7 @@ repository = "https://github.com/te-king/bevy-tes"
 # Internal crates (path deps shared across the workspace).
 tes-core = { path = "crates/tes-core" }
 tes3-esm = { path = "crates/tes3-esm" }
+tes3-esm-derive = { path = "crates/tes3-esm-derive" }
 tes3-bsa = { path = "crates/tes3-bsa" }
 tes-nif = { path = "crates/tes-nif" }
 tes-testdata = { path = "crates/tes-testdata" }
@@ -25,6 +26,9 @@ self_cell = "1.2.2"
 memmap2 = "0.9"
 bevy = { version = "0.19", default-features = false, features = ["bevy_asset"] }
 clap = { version = "4", features = ["derive"] }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
 
 [profile.release]
 lto = "thin"

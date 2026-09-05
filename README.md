@@ -31,6 +31,37 @@ Loose filesystem paths use the same encoding, so non-ASCII loose files can overr
 archive entries. Paths that are not valid Unicode or cannot be represented in
 Windows-1252 are skipped with a warning.
 
+## Record definitions
+
+The internal [`tes3-esm-derive`](crates/tes3-esm-derive) crate generates parsers from
+ordinary Rust structs using `syn` and `quote`. Most record modules use these derives;
+compact examples are
+[`BODY`](crates/tes3-esm/src/records/body.rs),
+[`ACTI`](crates/tes3-esm/src/records/acti.rs), and
+[`ARMO`](crates/tes3-esm/src/records/armo.rs). Public types and constructors remain
+unchanged.
+
+| Derive / attribute | Meaning |
+|---|---|
+| `TesRecord` | Generate `from_subrecords`, starting from `Default` and scanning in file order |
+| `#[tes(tag = b"NAME", decode = l1)]` | Assign the decoded payload to this field; the expression returns the field's actual type |
+| `#[tes(skip)]` | Leave a field to its default or a handwritten handler |
+| `#[tes(unmapped = Self::handler)]` | Forward unmapped tags to `handler(&mut self, sub)` instead of ignoring them |
+| `TesPayload` + `#[tes(parser = body_data)]` | Generate a private sequential `nom` parser with this name |
+| `#[tes(read = le_u32)]` | Read this payload field using the given parser, propagating errors |
+
+Decoders can be function paths or expressions such as
+`|bytes| Some(l1(bytes))` and `|bytes| parse_or_default(body_data, bytes)`.
+Recovery remains explicit: mapped record fields use the last decoded value,
+while custom handlers can preserve prior values or assemble grouped fields.
+Payload parsers return the unconsumed input without enforcing an exact length.
+Fixed-size arrays use `array(parser)` without heap allocation; padding uses ordinary
+`nom` combinators. Repeated actor fields share one handwritten handler.
+Both derives accept named structs with at most one input lifetime and retain
+borrowed data. The outer `CELL` and `TES3` scans and NPC stat-variant decoders remain
+handwritten; `CELL` still uses derived fixed-layout payloads. The
+derives are deliberately not a general-purpose binary-format framework.
+
 ## Status
 
 - **ESM/ESP** — full record coverage of `Morrowind.esm`, `Tribunal.esm`, `Bloodmoon.esm`.
