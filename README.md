@@ -25,6 +25,12 @@ There is also [`tes-testdata`](crates/tes-testdata), an internal (unpublished)
 dev-dependency that locates the gitignored `data/` directory for integration tests and
 encodes the skip-when-absent convention.
 
+Game-file IDs and paths retain their Windows-1252 bytes; string-based lookup APIs
+accept Unicode and encode it without replacement. ASCII lookups remain allocation-free.
+Loose filesystem paths use the same encoding, so non-ASCII loose files can override
+archive entries. Paths that are not valid Unicode or cannot be represented in
+Windows-1252 are skipped with a warning.
+
 ## Status
 
 - **ESM/ESP** — full record coverage of `Morrowind.esm`, `Tribunal.esm`, `Bloodmoon.esm`.

@@ -160,13 +160,15 @@ impl Bsa {
 
     /// Look up a file by path, case-insensitively and tolerant of `/` vs `\` separators.
     /// Returns a zero-copy slice into the archive mapping on success. A hash lookup
-    /// against the directory built at open time.
+    /// against the directory built at open time. `name` is Unicode; text outside
+    /// Windows-1252 cannot name an archive entry and returns `None`.
     pub fn get(&self, name: &str) -> Option<&[u8]> {
-        self.0
-            .borrow_dependent()
-            .files
-            .get(TesPath::from_bytes(name.as_bytes()))
-            .copied()
+        self.get_path(&TesPath::encode(name).ok()?)
+    }
+
+    /// Look up an authored Windows-1252 path without decoding or allocating.
+    pub fn get_path(&self, name: &TesPath) -> Option<&[u8]> {
+        self.0.borrow_dependent().files.get(name).copied()
     }
 }
 

@@ -4,9 +4,13 @@
 //! tests skip themselves when the (gitignored) `data/` fixtures are absent.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use bevy_tes::TesVfs;
+use bevy::asset::io::{AssetReader, Reader};
+use bevy::tasks::block_on;
+use bevy_tes::{TesVfs, TesVfsReader, tes3_bsa::Bsa};
+use tes_core::TesPath;
 
 /// A fresh temp directory tree with a couple of loose files, mimicking `Data Files`
 /// layout quirks (mixed case, nested dirs).
@@ -28,6 +32,93 @@ impl Drop for SyntheticRoot {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+/// A single-file BSA whose directory name is stored as authored Windows-1252 bytes.
+fn write_archive(path: &Path, name: &[u8], payload: &[u8]) {
+    let mut bytes = Vec::new();
+    for value in [
+        0x100u32,
+        12 + name.len() as u32 + 1,
+        1,
+        payload.len() as u32,
+        0,
+        0,
+    ] {
+        bytes.extend(value.to_le_bytes());
+    }
+    bytes.extend(name);
+    bytes.push(0);
+    bytes.extend([0; 8]);
+    bytes.extend(payload);
+    fs::write(path, bytes).unwrap();
+}
+
+fn read_asset(vfs: Arc<TesVfs>, root: &Path, path: &str) -> Vec<u8> {
+    let reader = TesVfsReader::new(vfs, root);
+    block_on(async {
+        let mut source = reader.read(Path::new(path)).await.unwrap();
+        let mut bytes = Vec::new();
+        source.read_to_end(&mut bytes).await.unwrap();
+        bytes
+    })
+}
+
+#[test]
+fn unicode_paths_share_archive_and_loose_keys() {
+    let root = SyntheticRoot::new("encoding");
+    let archive = root.0.join("test.bsa");
+    let raw = b"Textures\\Caf\xe9\x99.dds";
+    let path = "textures/caf\u{e9}\u{2122}.dds";
+    write_archive(&archive, raw, b"archived");
+
+    let bsa = Bsa::open(&archive).unwrap();
+    assert_eq!(bsa.get(path), Some(b"archived".as_slice()));
+    assert_eq!(bsa.get_path(TesPath::from_bytes(raw)), bsa.get(path));
+    assert!(bsa.get("textures/\u{1f600}.dds").is_none());
+
+    let vfs = Arc::new(TesVfs::new(&root.0, [&archive]).unwrap());
+    assert!(vfs.contains(path));
+    assert_eq!(vfs.read(path).unwrap(), b"archived");
+    assert_eq!(
+        vfs.resolve_texture("Caf\u{e9}\u{2122}.tga").as_deref(),
+        Some(path)
+    );
+    assert_eq!(read_asset(vfs, &root.0, path), b"archived");
+
+    fs::write(root.0.join("Textures/Caf\u{e9}\u{2122}.dds"), b"loose").unwrap();
+    fs::write(root.0.join("meshes/x/Caf\u{e9}.NIF"), b"model").unwrap();
+    let vfs = Arc::new(TesVfs::new(&root.0, [&archive]).unwrap());
+    assert_eq!(vfs.read(path).unwrap(), b"loose");
+    assert_eq!(read_asset(vfs.clone(), &root.0, path), b"loose");
+    assert_eq!(
+        vfs.resolve_model("x\\Caf\u{e9}.nif").as_deref(),
+        Some("meshes/x/caf\u{e9}.nif")
+    );
+}
+
+#[test]
+fn unrepresentable_loose_paths_do_not_prevent_loading() {
+    let root = SyntheticRoot::new("unrepresentable");
+    let path = "Textures/\u{1f600}.dds";
+    fs::write(root.0.join(path), b"not game data").unwrap();
+    let vfs = Arc::new(TesVfs::new(&root.0, Vec::<PathBuf>::new()).unwrap());
+    assert!(vfs.contains("textures/tx_wood.dds"));
+    assert!(!vfs.contains(path));
+    assert!(vfs.read(path).is_none());
+    let reader = TesVfsReader::new(vfs, &root.0);
+    assert!(block_on(reader.read(Path::new(path))).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_asset_paths_are_rejected() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let path = PathBuf::from(OsString::from_vec(b"Textures/raw\xff.dds".to_vec()));
+    let reader = TesVfsReader::new(Arc::new(TesVfs::empty()), std::env::temp_dir());
+    assert!(block_on(reader.read(&path)).is_err());
 }
 
 #[test]

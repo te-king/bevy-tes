@@ -217,21 +217,25 @@ impl TesLoadOrder {
         self.inner.borrow_owner()
     }
 
-    /// Look up a placeable object by editor id (any case).
+    /// Look up a placeable object by Unicode editor id (any ASCII case).
+    /// Text outside Windows-1252 cannot name an indexed object and returns `None`.
     pub fn object(&self, id: &str) -> Option<ObjectRef<'_>> {
-        self.table()
-            .objects
-            .get(TesId::from_bytes(id.as_bytes()))
-            .copied()
+        self.object_by_id(TesId::new(&L1Str::encode(id).ok()?))
     }
 
-    /// Look up a cell record by id (interior names match case-insensitively).
+    /// Look up an authored Windows-1252 id without decoding or allocating.
+    pub fn object_by_id(&self, id: &TesId) -> Option<ObjectRef<'_>> {
+        self.table().objects.get(id).copied()
+    }
+
+    /// Look up a cell record by id (interior names match ASCII case-insensitively).
+    /// Interior names outside Windows-1252 return `None`.
     pub fn cell(&self, id: &CellId) -> Option<&Cell<'_>> {
         let table = self.table();
         match id {
             CellId::Interior(name) => table
                 .interiors
-                .get(TesId::from_bytes(name.as_bytes()))
+                .get(TesId::new(&L1Str::encode(name).ok()?))
                 .copied(),
             CellId::Exterior { x, y } => table.exteriors.get(&(*x, *y)).copied(),
         }
@@ -464,6 +468,41 @@ mod tests {
 
         assert!(order.cell(&CellId::interior("nowhere")).is_none());
         assert!(order.cell(&CellId::exterior(99, 99)).is_none());
+    }
+
+    #[test]
+    fn unicode_lookups_match_authored_windows_1252_ids() {
+        let id = L1Str::from_bytes(b"Caf\xe9\x99");
+        let order = TesLoadOrder::from_esms(vec![Esm::from_static(EsmDirectory {
+            header: Default::default(),
+            records: vec![
+                Record::Stat(Stat {
+                    id,
+                    model: l1("a.nif"),
+                }),
+                Record::Cell(Cell {
+                    name: id,
+                    data: CellData {
+                        flags: CellFlags::INTERIOR,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+                Record::Stat(Stat {
+                    id: L1Str::from_bytes(b"raw\x81"),
+                    model: l1("b.nif"),
+                }),
+            ],
+        })]);
+        let name = "caf\u{e9}\u{2122}";
+        assert_eq!(order.object(name).unwrap().id(), id);
+        assert_eq!(order.object_by_id(TesId::new(id)), order.object(name));
+        assert_eq!(order.cell(&CellId::interior(name)).unwrap().name, id);
+        assert!(order.object("\u{1f600}").is_none());
+        assert!(order.cell(&CellId::interior("\u{1f600}")).is_none());
+        // Undefined bytes are still usable internally without a lossy text round trip.
+        assert!(order.object_by_id(TesId::from_bytes(b"raw\x81")).is_some());
+        assert!(order.object("raw\u{fffd}").is_none());
     }
 
     #[test]
