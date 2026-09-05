@@ -2,6 +2,7 @@
 
 use crate::common::{Subrecord, finish, flags, l1, le_u16};
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
 bitflags::bitflags! {
     /// Leveled item list flags (`DATA`).
@@ -21,36 +22,33 @@ pub struct LeveledItem<'a> {
     pub level: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
+#[tes(unmapped = Self::entry_field)]
 pub struct Levi<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"DATA", decode = |bytes| finish(flags(bytes)).unwrap_or_default())]
     pub flags: LeveledItemFlags,
     /// Chance that nothing is produced.
+    #[tes(tag = b"NNAM", decode = |bytes: &[u8]| bytes.first().copied().unwrap_or(0))]
     pub chance_none: u8,
+    #[tes(skip)]
     pub items: Vec<LeveledItem<'a>>,
 }
 
 impl<'a> Levi<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Levi<'a> {
-        let mut out = Levi::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"DATA" => out.flags = finish(flags(sub.data)).unwrap_or_default(),
-                b"NNAM" => out.chance_none = sub.data.first().copied().unwrap_or(0),
-                b"INDX" => {} // Count of following items; recoverable from `items.len()`.
-                b"INAM" => out.items.push(LeveledItem {
-                    item: l1(sub.data),
-                    level: 0,
-                }),
-                b"INTV" => {
-                    if let Some(last) = out.items.last_mut() {
-                        last.level = finish(le_u16(sub.data)).unwrap_or(0);
-                    }
+    fn entry_field(&mut self, sub: Subrecord<'a>) {
+        match &sub.tag.0 {
+            b"INAM" => self.items.push(LeveledItem {
+                item: l1(sub.data),
+                level: 0,
+            }),
+            b"INTV" => {
+                if let Some(last) = self.items.last_mut() {
+                    last.level = finish(le_u16(sub.data)).unwrap_or(0);
                 }
-                _ => {}
             }
+            _ => {}
         }
-        out
     }
 }

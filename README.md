@@ -34,11 +34,12 @@ Windows-1252 are skipped with a warning.
 ## Record definitions
 
 The internal [`tes3-esm-derive`](crates/tes3-esm-derive) crate generates parsers from
-ordinary Rust structs using `syn` and `quote`. The initial adopters are
+ordinary Rust structs using `syn` and `quote`. Most record modules use these derives;
+compact examples are
 [`BODY`](crates/tes3-esm/src/records/body.rs),
 [`ACTI`](crates/tes3-esm/src/records/acti.rs), and
-[`ARMO`](crates/tes3-esm/src/records/armo.rs); their public types and constructors
-are unchanged.
+[`ARMO`](crates/tes3-esm/src/records/armo.rs). Public types and constructors remain
+unchanged.
 
 | Derive / attribute | Meaning |
 |---|---|
@@ -54,8 +55,11 @@ Decoders can be function paths or expressions such as
 Recovery remains explicit: mapped record fields use the last decoded value,
 while custom handlers can preserve prior values or assemble grouped fields.
 Payload parsers return the unconsumed input without enforcing an exact length.
+Fixed-size arrays use `array(parser)` without heap allocation; padding uses ordinary
+`nom` combinators. Repeated actor fields share one handwritten handler.
 Both derives accept named structs with at most one input lifetime and retain
-borrowed data. Stateful scans such as `CELL` and `TES3` remain handwritten; the
+borrowed data. The outer `CELL` and `TES3` scans and NPC stat-variant decoders remain
+handwritten; `CELL` still uses derived fixed-layout payloads. The
 derives are deliberately not a general-purpose binary-format framework.
 
 ## Status

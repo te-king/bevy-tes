@@ -6,7 +6,9 @@
 //! (decoded on demand); purely numeric types ([`Effect`], [`AiData`], [`AmbientLight`])
 //! are `Copy`.
 
-use super::common::{Color, color, enumeration, fixed_l1str, flags};
+use super::common::{
+    Color, Subrecord, color, enumeration, finish, fixed_l1str, flags, l1, parse_or_default,
+};
 use crate::macros::enum_field;
 use nom::IResult;
 use nom::number::complete::{le_f32, le_i8, le_i32, le_u8, le_u16, le_u32};
@@ -275,6 +277,55 @@ pub fn ai_wander(input: &[u8]) -> IResult<&[u8], AiPackage<'_>> {
             idles,
         },
     ))
+}
+
+/// The ordered inventory, spell, travel, and AI fields shared by CREA and NPC_.
+pub(crate) fn actor_field<'a>(
+    sub: Subrecord<'a>,
+    inventory: &mut Vec<InventoryItem<'a>>,
+    spells: &mut Vec<&'a L1Str>,
+    destinations: &mut Vec<TravelDestination<'a>>,
+    packages: &mut Vec<AiPackage<'a>>,
+) {
+    let package = match &sub.tag.0 {
+        b"NPCO" => {
+            inventory.push(parse_or_default(inventory_item, sub.data));
+            None
+        }
+        b"NPCS" => {
+            spells.push(finish(fixed_l1str(32)(sub.data)).unwrap_or_default());
+            None
+        }
+        b"DODT" => {
+            if let Some(dest) = finish(travel_destination(sub.data)) {
+                destinations.push(dest);
+            }
+            None
+        }
+        b"DNAM" => {
+            if let Some(last) = destinations.last_mut() {
+                last.cell = Some(l1(sub.data));
+            }
+            None
+        }
+        b"AI_A" => finish(ai_activate(sub.data)),
+        b"AI_E" => finish(ai_escort(sub.data)),
+        b"AI_F" => finish(ai_follow(sub.data)),
+        b"AI_T" => finish(ai_travel(sub.data)),
+        b"AI_W" => finish(ai_wander(sub.data)),
+        b"CNDT" => {
+            if let Some(AiPackage::Escort { cell, .. } | AiPackage::Follow { cell, .. }) =
+                packages.last_mut()
+            {
+                *cell = Some(l1(sub.data));
+            }
+            None
+        }
+        _ => None,
+    };
+    if let Some(package) = package {
+        packages.push(package);
+    }
 }
 
 /// A biped equipment slot entry (`INDX` + optional `BNAM`/`CNAM`). Shared by ARMO and

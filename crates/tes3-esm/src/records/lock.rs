@@ -1,57 +1,34 @@
 //! `LOCK` — a lockpick.
 
-use crate::common::{Subrecord, l1, le_f32, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{l1, le_f32, le_u32, parse_or_default};
 use tes_core::L1Str;
+use tes3_esm_derive::{TesPayload, TesRecord};
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = lock_data)]
 pub struct LockData {
+    #[tes(read = le_f32)]
     pub weight: f32,
+    #[tes(read = le_u32)]
     pub value: u32,
+    #[tes(read = le_f32)]
     pub quality: f32,
+    #[tes(read = le_u32)]
     pub uses: u32,
 }
 
-fn lock_data(input: &[u8]) -> IResult<&[u8], LockData> {
-    let (input, weight) = le_f32(input)?;
-    let (input, value) = le_u32(input)?;
-    let (input, quality) = le_f32(input)?;
-    let (input, uses) = le_u32(input)?;
-    Ok((
-        input,
-        LockData {
-            weight,
-            value,
-            quality,
-            uses,
-        },
-    ))
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Lock<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"MODL", decode = l1)]
     pub model: &'a L1Str,
+    #[tes(tag = b"FNAM", decode = |bytes| Some(l1(bytes)))]
     pub name: Option<&'a L1Str>,
+    #[tes(tag = b"LKDT", decode = |bytes| parse_or_default(lock_data, bytes))]
     pub data: LockData,
+    #[tes(tag = b"SCRI", decode = |bytes| Some(l1(bytes)))]
     pub script: Option<&'a L1Str>,
+    #[tes(tag = b"ITEX", decode = |bytes| Some(l1(bytes)))]
     pub icon: Option<&'a L1Str>,
-}
-
-impl<'a> Lock<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Lock<'a> {
-        let mut out = Lock::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"MODL" => out.model = l1(sub.data),
-                b"FNAM" => out.name = Some(l1(sub.data)),
-                b"LKDT" => out.data = parse_or_default(lock_data, sub.data),
-                b"SCRI" => out.script = Some(l1(sub.data)),
-                b"ITEX" => out.icon = Some(l1(sub.data)),
-                _ => {}
-            }
-        }
-        out
-    }
 }

@@ -3,8 +3,8 @@
 use crate::common::{Subrecord, enumeration, flags, l1, le_u32, parse_or_default};
 use crate::macros::enum_field;
 use crate::shared::{Effect, effect};
-use nom::IResult;
 use tes_core::L1Str;
+use tes3_esm_derive::{TesPayload, TesRecord};
 
 bitflags::bitflags! {
     /// Enchantment flags (`ENDT`).
@@ -24,48 +24,34 @@ enum_field! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = enchant_data)]
 pub struct EnchantData {
+    #[tes(read = enumeration)]
     pub kind: EnchantKind,
+    #[tes(read = le_u32)]
     pub cost: u32,
+    #[tes(read = le_u32)]
     pub charge: u32,
+    #[tes(read = flags)]
     pub flags: EnchantFlags,
 }
 
-fn enchant_data(input: &[u8]) -> IResult<&[u8], EnchantData> {
-    let (input, kind) = enumeration(input)?;
-    let (input, cost) = le_u32(input)?;
-    let (input, charge) = le_u32(input)?;
-    let (input, flags) = flags(input)?;
-    Ok((
-        input,
-        EnchantData {
-            kind,
-            cost,
-            charge,
-            flags,
-        },
-    ))
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
+#[tes(unmapped = Self::effect_field)]
 pub struct Ench<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"ENDT", decode = |bytes| parse_or_default(enchant_data, bytes))]
     pub data: EnchantData,
+    #[tes(skip)]
     pub effects: Vec<Effect>,
 }
 
 impl<'a> Ench<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Ench<'a> {
-        let mut out = Ench::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"ENDT" => out.data = parse_or_default(enchant_data, sub.data),
-                b"ENAM" => out.effects.push(parse_or_default(effect, sub.data)),
-                _ => {}
-            }
+    fn effect_field(&mut self, sub: Subrecord<'a>) {
+        if &sub.tag.0 == b"ENAM" {
+            self.effects.push(parse_or_default(effect, sub.data));
         }
-        out
     }
 }

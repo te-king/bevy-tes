@@ -8,11 +8,11 @@
 //! The [`Record`] enum (re-exported at the crate root) and its tag dispatch are generated
 //! here from the `records!` table below, so each record type is listed exactly once.
 //!
-//! `BODY`, `ACTI`, and `ARMO` use the internal `TesRecord` derive to generate independent
-//! field assignments and `TesPayload` for fixed-layout binary data. Decoder expressions
-//! keep recovery policy explicit; armor's grouped biped fields use a handwritten
-//! `unmapped` handler. Stateful scans such as CELL's reference phases and TES3's
-//! `MAST`/`DATA` pairing remain handwritten.
+//! Most modules use the internal `TesRecord` derive for independent field assignments
+//! and `TesPayload` for fixed-layout binary data. Decoder expressions keep recovery
+//! policy explicit; repeated, grouped, and multi-field updates use handwritten
+//! `unmapped` handlers. CELL's reference phases, TES3's `MAST`/`DATA` pairing, and the
+//! NPC stat-variant decoders remain handwritten.
 
 pub mod acti;
 pub mod alch;

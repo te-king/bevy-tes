@@ -6,11 +6,12 @@
 //! "moved references" (`MVRF`-led) recording objects relocated from another cell.
 
 use crate::common::{
-    Color, Subrecord, color, finish, flags, l1, le_f32, le_i32, le_u32, parse_or_default,
+    Color, Subrecord, array, color, finish, flags, l1, le_f32, le_i32, le_u32, parse_or_default,
 };
 use crate::shared::{AmbientLight, TravelDestination, ambient_light, travel_destination};
 use nom::IResult;
 use tes_core::L1Str;
+use tes3_esm_derive::TesPayload;
 
 bitflags::bitflags! {
     /// Cell flags (`DATA`).
@@ -24,48 +25,25 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = cell_data)]
 pub struct CellData {
+    #[tes(read = flags)]
     pub flags: CellFlags,
+    #[tes(read = le_i32)]
     pub grid_x: i32,
+    #[tes(read = le_i32)]
     pub grid_y: i32,
 }
 
-fn cell_data(input: &[u8]) -> IResult<&[u8], CellData> {
-    let (input, flags) = flags(input)?;
-    let (input, grid_x) = le_i32(input)?;
-    let (input, grid_y) = le_i32(input)?;
-    Ok((
-        input,
-        CellData {
-            flags,
-            grid_x,
-            grid_y,
-        },
-    ))
-}
-
 /// Position + rotation of a placed reference (`DATA`, 24 bytes; rotations in radians).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = reference_transform)]
 pub struct ReferenceTransform {
+    #[tes(read = array(le_f32))]
     pub position: [f32; 3],
+    #[tes(read = array(le_f32))]
     pub rotation: [f32; 3],
-}
-
-fn reference_transform(input: &[u8]) -> IResult<&[u8], ReferenceTransform> {
-    let (input, px) = le_f32(input)?;
-    let (input, py) = le_f32(input)?;
-    let (input, pz) = le_f32(input)?;
-    let (input, rx) = le_f32(input)?;
-    let (input, ry) = le_f32(input)?;
-    let (input, rz) = le_f32(input)?;
-    Ok((
-        input,
-        ReferenceTransform {
-            position: [px, py, pz],
-            rotation: [rx, ry, rz],
-        },
-    ))
 }
 
 /// A single object reference placed within a cell.

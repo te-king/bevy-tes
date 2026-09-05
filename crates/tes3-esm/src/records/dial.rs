@@ -1,8 +1,9 @@
 //! `DIAL` — a dialogue topic. The `INFO` records that follow it belong to it.
 
-use crate::common::{Subrecord, l1};
+use crate::common::l1;
 use crate::macros::enum_field;
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
 enum_field! {
     /// Dialogue type (`DATA`). Shared with the INFO records that follow the topic.
@@ -15,23 +16,11 @@ enum_field! {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Dial<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
     /// `None` when the (rare) `DATA` field is absent.
+    #[tes(tag = b"DATA", decode = |bytes: &[u8]| bytes.first().map(|&b| DialogueKind::from(b)))]
     pub kind: Option<DialogueKind>,
-}
-
-impl<'a> Dial<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Dial<'a> {
-        let mut out = Dial::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"DATA" => out.kind = sub.data.first().map(|&b| DialogueKind::from(b)),
-                _ => {}
-            }
-        }
-        out
-    }
 }

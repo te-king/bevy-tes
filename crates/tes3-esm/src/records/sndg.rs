@@ -1,8 +1,9 @@
 //! `SNDG` — a sound generator.
 
-use crate::common::{Subrecord, enumeration, finish, l1};
+use crate::common::{enumeration, finish, l1};
 use crate::macros::enum_field;
 use tes_core::L1Str;
+use tes3_esm_derive::TesRecord;
 
 enum_field! {
     /// Sound generator trigger (`DATA`).
@@ -18,27 +19,15 @@ enum_field! {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Sndg<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"DATA", decode = |bytes| finish(enumeration(bytes)).unwrap_or_default())]
     pub kind: SoundGenKind,
+    #[tes(tag = b"CNAM", decode = |bytes| Some(l1(bytes)))]
     pub creature: Option<&'a L1Str>,
     /// Sound ID string.
+    #[tes(tag = b"SNAM", decode = |bytes| Some(l1(bytes)))]
     pub sound: Option<&'a L1Str>,
-}
-
-impl<'a> Sndg<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Sndg<'a> {
-        let mut out = Sndg::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"DATA" => out.kind = finish(enumeration(sub.data)).unwrap_or_default(),
-                b"CNAM" => out.creature = Some(l1(sub.data)),
-                b"SNAM" => out.sound = Some(l1(sub.data)),
-                _ => {}
-            }
-        }
-        out
-    }
 }

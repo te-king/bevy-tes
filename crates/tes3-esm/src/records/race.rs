@@ -1,8 +1,8 @@
 //! `RACE` — a character race.
 
-use crate::common::{Subrecord, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
-use nom::IResult;
+use crate::common::{Subrecord, array, flags, l1, le_f32, le_i32, le_u32, parse_or_default};
 use tes_core::L1Str;
+use tes3_esm_derive::{TesPayload, TesRecord};
 
 bitflags::bitflags! {
     /// Race flags (`RADT`).
@@ -14,81 +14,54 @@ bitflags::bitflags! {
 }
 
 /// A skill bonus granted by the race (skill ID + bonus amount).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = skill_bonus)]
 pub struct SkillBonus {
     /// Skill ID, or `-1` for an empty slot.
+    #[tes(read = le_i32)]
     pub skill: i32,
+    #[tes(read = le_i32)]
     pub bonus: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = race_data)]
 pub struct RaceData {
+    #[tes(read = array(skill_bonus))]
     pub skill_bonuses: [SkillBonus; 7],
     /// Attribute base values, indexed `[attribute][gender]`.
+    #[tes(read = array(array(le_u32)))]
     pub attributes: [[u32; 2]; 8],
     /// Height per gender.
+    #[tes(read = array(le_f32))]
     pub height: [f32; 2],
     /// Weight per gender.
+    #[tes(read = array(le_f32))]
     pub weight: [f32; 2],
+    #[tes(read = flags)]
     pub flags: RaceFlags,
 }
 
-fn race_data(input: &[u8]) -> IResult<&[u8], RaceData> {
-    let mut input = input;
-    let mut skill_bonuses = [SkillBonus::default(); 7];
-    for slot in skill_bonuses.iter_mut() {
-        let (rest, skill) = le_i32(input)?;
-        let (rest, bonus) = le_i32(rest)?;
-        *slot = SkillBonus { skill, bonus };
-        input = rest;
-    }
-    let mut attributes = [[0u32; 2]; 8];
-    for attr in attributes.iter_mut() {
-        let (rest, m) = le_u32(input)?;
-        let (rest, f) = le_u32(rest)?;
-        *attr = [m, f];
-        input = rest;
-    }
-    let (input, hm) = le_f32(input)?;
-    let (input, hf) = le_f32(input)?;
-    let (input, wm) = le_f32(input)?;
-    let (input, wf) = le_f32(input)?;
-    let (input, flags) = flags(input)?;
-    Ok((
-        input,
-        RaceData {
-            skill_bonuses,
-            attributes,
-            height: [hm, hf],
-            weight: [wm, wf],
-            flags,
-        },
-    ))
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
+#[tes(unmapped = Self::power_field)]
 pub struct Race<'a> {
+    #[tes(tag = b"NAME", decode = l1)]
     pub id: &'a L1Str,
+    #[tes(tag = b"FNAM", decode = |bytes| Some(l1(bytes)))]
     pub name: Option<&'a L1Str>,
+    #[tes(tag = b"RADT", decode = |bytes| parse_or_default(race_data, bytes))]
     pub data: RaceData,
     /// Special power / ability spell IDs.
+    #[tes(skip)]
     pub powers: Vec<&'a L1Str>,
+    #[tes(tag = b"DESC", decode = |bytes| Some(l1(bytes)))]
     pub description: Option<&'a L1Str>,
 }
 
 impl<'a> Race<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Race<'a> {
-        let mut out = Race::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"NAME" => out.id = l1(sub.data),
-                b"FNAM" => out.name = Some(l1(sub.data)),
-                b"RADT" => out.data = parse_or_default(race_data, sub.data),
-                b"NPCS" => out.powers.push(l1(sub.data)),
-                b"DESC" => out.description = Some(l1(sub.data)),
-                _ => {}
-            }
+    fn power_field(&mut self, sub: Subrecord<'a>) {
+        if &sub.tag.0 == b"NPCS" {
+            self.powers.push(l1(sub.data));
         }
-        out
     }
 }

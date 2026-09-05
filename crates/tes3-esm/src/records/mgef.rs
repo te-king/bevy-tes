@@ -1,9 +1,9 @@
 //! `MGEF` — a magic effect.
 
-use crate::common::{Subrecord, enumeration, finish, flags, l1, le_f32, le_u32, parse_or_default};
+use crate::common::{enumeration, finish, flags, l1, le_f32, le_u32, parse_or_default};
 use crate::macros::enum_field;
-use nom::IResult;
 use tes_core::L1Str;
+use tes3_esm_derive::{TesPayload, TesRecord};
 
 bitflags::bitflags! {
     /// Magic effect flags (`MEDT`). Only these bits are stored in the file; behavior
@@ -28,84 +28,56 @@ enum_field! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, TesPayload)]
+#[tes(parser = magic_effect_data)]
 pub struct MagicEffectData {
+    #[tes(read = enumeration)]
     pub school: MagicSchool,
+    #[tes(read = le_f32)]
     pub base_cost: f32,
+    #[tes(read = flags)]
     pub flags: MagicEffectFlags,
+    #[tes(read = le_u32)]
     pub red: u32,
+    #[tes(read = le_u32)]
     pub green: u32,
+    #[tes(read = le_u32)]
     pub blue: u32,
+    #[tes(read = le_f32)]
     pub speed_x: f32,
+    #[tes(read = le_f32)]
     pub size_x: f32,
+    #[tes(read = le_f32)]
     pub size_cap: f32,
 }
 
-fn magic_effect_data(input: &[u8]) -> IResult<&[u8], MagicEffectData> {
-    let (input, school) = enumeration(input)?;
-    let (input, base_cost) = le_f32(input)?;
-    let (input, flags) = flags(input)?;
-    let (input, red) = le_u32(input)?;
-    let (input, green) = le_u32(input)?;
-    let (input, blue) = le_u32(input)?;
-    let (input, speed_x) = le_f32(input)?;
-    let (input, size_x) = le_f32(input)?;
-    let (input, size_cap) = le_f32(input)?;
-    Ok((
-        input,
-        MagicEffectData {
-            school,
-            base_cost,
-            flags,
-            red,
-            green,
-            blue,
-            speed_x,
-            size_x,
-            size_cap,
-        },
-    ))
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, TesRecord)]
 pub struct Mgef<'a> {
     /// Effect index (names are hardcoded in the engine).
+    #[tes(tag = b"INDX", decode = |bytes| finish(le_u32(bytes)).unwrap_or(0))]
     pub index: u32,
+    #[tes(tag = b"MEDT", decode = |bytes| parse_or_default(magic_effect_data, bytes))]
     pub data: MagicEffectData,
+    #[tes(tag = b"ITEX", decode = |bytes| Some(l1(bytes)))]
     pub icon: Option<&'a L1Str>,
+    #[tes(tag = b"PTEX", decode = |bytes| Some(l1(bytes)))]
     pub particle_texture: Option<&'a L1Str>,
+    #[tes(tag = b"BSND", decode = |bytes| Some(l1(bytes)))]
     pub bolt_sound: Option<&'a L1Str>,
+    #[tes(tag = b"CSND", decode = |bytes| Some(l1(bytes)))]
     pub casting_sound: Option<&'a L1Str>,
+    #[tes(tag = b"HSND", decode = |bytes| Some(l1(bytes)))]
     pub hit_sound: Option<&'a L1Str>,
+    #[tes(tag = b"ASND", decode = |bytes| Some(l1(bytes)))]
     pub area_sound: Option<&'a L1Str>,
+    #[tes(tag = b"CVFX", decode = |bytes| Some(l1(bytes)))]
     pub casting_visual: Option<&'a L1Str>,
+    #[tes(tag = b"BVFX", decode = |bytes| Some(l1(bytes)))]
     pub bolt_visual: Option<&'a L1Str>,
+    #[tes(tag = b"HVFX", decode = |bytes| Some(l1(bytes)))]
     pub hit_visual: Option<&'a L1Str>,
+    #[tes(tag = b"AVFX", decode = |bytes| Some(l1(bytes)))]
     pub area_visual: Option<&'a L1Str>,
+    #[tes(tag = b"DESC", decode = |bytes| Some(l1(bytes)))]
     pub description: Option<&'a L1Str>,
-}
-
-impl<'a> Mgef<'a> {
-    pub fn from_subrecords(subs: impl Iterator<Item = Subrecord<'a>>) -> Mgef<'a> {
-        let mut out = Mgef::default();
-        for sub in subs {
-            match &sub.tag.0 {
-                b"INDX" => out.index = finish(le_u32(sub.data)).unwrap_or(0),
-                b"MEDT" => out.data = parse_or_default(magic_effect_data, sub.data),
-                b"ITEX" => out.icon = Some(l1(sub.data)),
-                b"PTEX" => out.particle_texture = Some(l1(sub.data)),
-                b"BSND" => out.bolt_sound = Some(l1(sub.data)),
-                b"CSND" => out.casting_sound = Some(l1(sub.data)),
-                b"HSND" => out.hit_sound = Some(l1(sub.data)),
-                b"ASND" => out.area_sound = Some(l1(sub.data)),
-                b"CVFX" => out.casting_visual = Some(l1(sub.data)),
-                b"BVFX" => out.bolt_visual = Some(l1(sub.data)),
-                b"HVFX" => out.hit_visual = Some(l1(sub.data)),
-                b"AVFX" => out.area_visual = Some(l1(sub.data)),
-                b"DESC" => out.description = Some(l1(sub.data)),
-                _ => {}
-            }
-        }
-        out
-    }
 }
