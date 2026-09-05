@@ -8,10 +8,11 @@
 //! The [`Record`] enum (re-exported at the crate root) and its tag dispatch are generated
 //! here from the `records!` table below, so each record type is listed exactly once.
 //!
-//! The `from_subrecords` loops are deliberately hand-written rather than macro-generated:
-//! roughly a quarter of the records are stateful scans (CELL's reference phases, TES3's
-//! `MAST`/`DATA` pairing, LEVC/LEVI's `last_mut` coupling, NPC_/CREA's length-dispatched
-//! `NPDT`), so a dispatch macro would split the crate into two idioms for little gain.
+//! `BODY`, `ACTI`, and `ARMO` use the internal `TesRecord` derive to generate independent
+//! field assignments and `TesPayload` for fixed-layout binary data. Decoder expressions
+//! keep recovery policy explicit; armor's grouped biped fields use a handwritten
+//! `unmapped` handler. Stateful scans such as CELL's reference phases and TES3's
+//! `MAST`/`DATA` pairing remain handwritten.
 
 pub mod acti;
 pub mod alch;

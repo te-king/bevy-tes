@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 bitflags = { workspace = true }
 tes-core = { workspace = true }
+tes3-esm-derive = { workspace = true }
 thiserror = { workspace = true }
 nom = { workspace = true }
 self_cell = { workspace = true }

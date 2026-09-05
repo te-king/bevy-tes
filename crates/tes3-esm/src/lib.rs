@@ -19,6 +19,8 @@
 //! [`EsmDirectory::parse`] directly.
 
 pub mod common;
+#[cfg(test)]
+mod derive_tests;
 mod macros;
 pub mod records;
 pub mod shared;
