@@ -9,7 +9,7 @@
 //!
 //! The map is built once at construction. Archive entries key on a [`TesPath`] borrowed
 //! straight from the (mmap-backed) archive and point at a zero-copy slice of it; loose
-//! entries key on an owned [`TesPathBuf`] and point at their `root`-relative on-disk path,
+//! entries key on an owned [`TesPathBuf`](tes_core::TesPathBuf) and point at their `root`-relative on-disk path,
 //! read on demand. Because [`TesPath`] compares and hashes in the game's path normal form,
 //! lookups are case-insensitive and `/`-vs-`\` agnostic on every platform.
 //!
@@ -21,15 +21,14 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bevy::asset::io::file::FileAssetReader;
 use bevy::asset::io::{AssetReader, AssetReaderError, PathStream, Reader, SliceReader, VecReader};
 use self_cell::self_cell;
+use tes_core::TesPath;
 use tes_core::tes_path::normalize;
-use tes_core::{TesPath, TesPathBuf};
 use tes3_bsa::Bsa;
 
 /// A layered, case-insensitive view over a Morrowind `Data Files` directory and its BSA
@@ -70,6 +69,8 @@ impl TesVfs {
     /// relative to the process, not `root`; later archives override earlier ones, and
     /// loose files under `root` override them all). Fails if `root` can't be walked or an
     /// archive can't be opened — an explicit list is a statement of intent.
+    /// Loose paths that are not Unicode or cannot be encoded as Windows-1252 are
+    /// skipped with a warning.
     pub fn new(
         root: impl AsRef<Path>,
         archives: impl IntoIterator<Item = impl AsRef<Path>>,
@@ -132,23 +133,24 @@ impl TesVfs {
         }
     }
 
-    /// Whether `path` (any case, `/` or `\` separators) resolves to a file. I/O-free.
+    /// Whether a Unicode `path` (any ASCII case, `/` or `\` separators) resolves to a
+    /// file. I/O-free. Text outside Windows-1252 cannot match and returns `false`.
     pub fn contains(&self, path: &str) -> bool {
+        let Ok(path) = TesPath::encode(path) else {
+            return false;
+        };
         self.internal
             .borrow_dependent()
             .table
-            .contains_key(TesPath::from_bytes(path.as_bytes()))
+            .contains_key(path.as_ref())
     }
 
     /// Read a file's bytes: a copy of the archive slice, or the loose file read from disk.
-    /// `None` when the path isn't in the VFS (or a loose file can't be read).
+    /// `path` is Unicode. `None` when the path isn't in the VFS, is outside
+    /// Windows-1252, or a loose file can't be read.
     pub fn read(&self, path: &str) -> Option<Vec<u8>> {
-        match self
-            .internal
-            .borrow_dependent()
-            .table
-            .get(TesPath::from_bytes(path.as_bytes()))?
-        {
+        let path = TesPath::encode(path).ok()?;
+        match self.internal.borrow_dependent().table.get(path.as_ref())? {
             Source::Archived(bytes) => Some(bytes.to_vec()),
             Source::Loose(rel) => std::fs::read(self.root.as_ref()?.join(rel)).ok(),
         }
@@ -221,12 +223,29 @@ fn index_loose_files<'a>(
             if entry.file_type()?.is_dir() {
                 stack.push(path);
             } else if let Ok(rel) = path.strip_prefix(root) {
-                let key = TesPathBuf::from_bytes(rel.as_os_str().as_bytes().to_vec());
-                table.insert(Cow::Owned(key), Source::Loose(rel.to_path_buf()));
+                match encode_path(rel) {
+                    Ok(key) => {
+                        table.insert(
+                            Cow::Owned(key.into_owned()),
+                            Source::Loose(rel.to_path_buf()),
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("bevy-tes: skipping loose path {}: {e}", path.display());
+                    }
+                }
             }
         }
     }
     Ok(())
+}
+
+/// OS paths are Unicode text, not the raw Windows-1252 bytes stored in game files.
+fn encode_path(path: &Path) -> io::Result<Cow<'_, TesPath>> {
+    let text = path
+        .to_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "path is not valid Unicode"))?;
+    TesPath::encode(text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// [`AssetReader`] serving the `tes://` source from a shared [`TesVfs`]. Archive files
@@ -252,8 +271,8 @@ impl TesVfsReader {
 
 impl AssetReader for TesVfsReader {
     async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
-        let key = TesPath::from_bytes(path.as_os_str().as_bytes());
-        match self.vfs.internal.borrow_dependent().table.get(key) {
+        let key = encode_path(path)?;
+        match self.vfs.internal.borrow_dependent().table.get(key.as_ref()) {
             // Zero-copy view straight into the archive mapping.
             Some(Source::Archived(bytes)) => {
                 Ok(Box::new(SliceReader::new(bytes)) as Box<dyn Reader + 'a>)

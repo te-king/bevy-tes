@@ -9,7 +9,7 @@
 //! the borrowed/owned view pair (mirroring [`Path`](std::path::Path)/[`PathBuf`](std::path::PathBuf)
 //! and [`L1Str`]/[`L1String`]) that compare and hash *as if* normalized, without allocating.
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -38,6 +38,14 @@ pub fn normalize(path: &str) -> String {
 pub struct TesPath(L1Str);
 
 impl TesPath {
+    /// Encode a Unicode path as Windows-1252 without loss; ASCII stays borrowed.
+    pub fn encode(path: &str) -> Result<Cow<'_, TesPath>, crate::latin1::EncodeError> {
+        Ok(match L1Str::encode(path)? {
+            Cow::Borrowed(path) => Cow::Borrowed(Self::new(path)),
+            Cow::Owned(path) => Cow::Owned(TesPathBuf(path)),
+        })
+    }
+
     /// View a Windows-1252 path string as a `TesPath` without copying or decoding.
     /// Normalization is deferred to the [`PartialEq`] and [`Hash`] impls.
     pub fn new(path: &L1Str) -> &TesPath {
@@ -198,6 +206,19 @@ mod tests {
         let mut hasher = DefaultHasher::new();
         p.hash(&mut hasher);
         hasher.finish()
+    }
+
+    #[test]
+    fn unicode_encoding_matches_authored_path_bytes() {
+        let raw = TesPath::from_bytes(b"Textures\\Caf\xe9\x99.dds");
+        let encoded = TesPath::encode("textures/caf\u{e9}\u{2122}.dds").unwrap();
+        assert_eq!(raw, encoded.as_ref());
+        assert_eq!(hash_of(raw), hash_of(&encoded));
+        assert!(matches!(
+            TesPath::encode("textures/a.dds"),
+            Ok(Cow::Borrowed(_))
+        ));
+        assert!(TesPath::encode("textures/\u{1f600}.dds").is_err());
     }
 
     #[test]

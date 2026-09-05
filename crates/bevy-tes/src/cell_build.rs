@@ -157,7 +157,10 @@ impl PlanBuilder<'_> {
 
     fn plan_reference(&mut self, reference: &Reference) {
         let object_id = reference.object.decode().into_owned();
-        let Some(info) = self.load_order.object(&object_id) else {
+        let Some(info) = self
+            .load_order
+            .object_by_id(tes_core::TesId::new(reference.object))
+        else {
             self.warn_once(
                 object_id.clone(),
                 format!("cell references unknown object id {object_id:?}"),
@@ -474,5 +477,33 @@ mod tests {
             panic!("an unauthored grid must not build a plan");
         };
         assert!(err.contains("no such cell"), "{err}");
+    }
+
+    #[test]
+    fn reference_lookup_preserves_authored_id_bytes() {
+        let id = L1Str::from_bytes(b"caf\xe9\x81");
+        let order = TesLoadOrder::from_esms(vec![Esm::from_static(EsmDirectory {
+            header: Default::default(),
+            records: vec![
+                Record::Stat(Stat { id, model: l1("") }),
+                Record::Cell(Cell {
+                    name: l1("Test Cell"),
+                    data: CellData {
+                        flags: CellFlags::INTERIOR,
+                        ..Default::default()
+                    },
+                    references: vec![Reference {
+                        id: 1,
+                        object: id,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+            ],
+        })]);
+        let plan = build_cell(&order, &TesVfs::empty(), &CellId::interior("Test Cell")).unwrap();
+        assert_eq!(plan.references.len(), 1);
+        assert_eq!(plan.skipped, 0);
+        assert!(plan.warnings.is_empty());
     }
 }

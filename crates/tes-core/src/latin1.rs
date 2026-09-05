@@ -16,7 +16,43 @@ use std::fmt;
 #[repr(transparent)]
 pub struct L1Str([u8]);
 
+/// A Unicode character with no Windows-1252 representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncodeError(pub char);
+
+impl fmt::Display for EncodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "character {:?} cannot be encoded as Windows-1252",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for EncodeError {}
+
 impl L1Str {
+    /// Encode Unicode text without replacement or best-fit substitutions.
+    /// ASCII borrows the input; non-ASCII text allocates only the encoded bytes.
+    pub fn encode(text: &str) -> Result<Cow<'_, L1Str>, EncodeError> {
+        if text.is_ascii() {
+            return Ok(Cow::Borrowed(Self::from_bytes(text.as_bytes())));
+        }
+        let bytes = text
+            .chars()
+            .map(|c| match c {
+                '\0'..='\u{7f}' | '\u{a0}'..='\u{ff}' => Ok(c as u8),
+                // Reuse the decoder's mapping, excluding its lossy replacement value.
+                c if c != '\u{fffd}' => (0x80..=0x9f)
+                    .find(|&b| cp1252_to_char(b) == c)
+                    .ok_or(EncodeError(c)),
+                c => Err(EncodeError(c)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Cow::Owned(L1String::from_bytes(bytes)))
+    }
+
     /// Wrap raw Windows-1252 bytes as an `&L1Str` without copying or decoding.
     pub fn from_bytes(bytes: &[u8]) -> &L1Str {
         // SAFETY: `L1Str` is `repr(transparent)` over `[u8]`, so a `&[u8]` and a
@@ -251,6 +287,24 @@ mod tests {
         assert!(matches!(L1Str::from_bytes(&[0xE9]).decode(), Cow::Owned(_)));
         assert_eq!(L1Str::from_bytes(&[0xE9]).decode(), "é");
         assert_eq!(L1Str::from_bytes(&[0x99]).decode(), "™");
+    }
+
+    #[test]
+    fn encoding_borrows_ascii_and_round_trips_defined_bytes() {
+        assert!(matches!(L1Str::encode("hello"), Ok(Cow::Borrowed(_))));
+        for b in 0..=u8::MAX {
+            let c = cp1252_to_char(b);
+            if c != '\u{fffd}' {
+                assert_eq!(L1Str::encode(&c.to_string()).unwrap().as_bytes(), &[b]);
+            }
+        }
+    }
+
+    #[test]
+    fn encoding_rejects_unrepresentable_characters() {
+        for c in ['\u{fffd}', '\u{81}', '\u{100}', '\u{1f600}'] {
+            assert_eq!(L1Str::encode(&c.to_string()), Err(EncodeError(c)));
+        }
     }
 
     #[test]
